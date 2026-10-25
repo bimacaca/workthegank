@@ -38,7 +38,7 @@ interface AppContextType {
     status: NumberStatus,
     failedReason?: string
   ) => Promise<void>;
-  uploadProofVideo: (taskId: string, file: File | { name: string; size: string; url: string }) => Promise<void>;
+  uploadProofVideo: (taskId: string, file: File) => Promise<boolean>;
   deleteProofVideo: (taskId: string, videoId: string) => Promise<void>;
   submitTaskForReview: (taskId: string) => Promise<void>;
 
@@ -612,39 +612,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Upload proof video
-  const uploadProofVideo = async (
-    taskId: string,
-    file: File | { name: string; size: string; url: string }
-  ) => {
+  const uploadProofVideo = async (taskId: string, file: File): Promise<boolean> => {
     try {
-      let res;
-      if (file instanceof File) {
-        const formData = new FormData();
-        formData.append('video', file);
-        res = await fetch(`/api/tasks/${taskId}/upload-proof`, {
-          method: 'POST',
-          body: formData,
-        });
-      } else {
-        res = await fetch(`/api/tasks/${taskId}/upload-proof`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mockUrl: file.url,
-            fileName: file.name,
-            fileSize: file.size,
-          }),
-        });
+      const formData = new FormData();
+      formData.append('video', file);
+      const res = await fetch(`/api/tasks/${taskId}/upload-proof`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || 'Gagal mengunggah video');
+        return false;
       }
 
-      if (res && res.ok) {
-        await refreshData();
-        showToast('Video bukti berhasil disimpan');
-      } else {
-        showToast('Gagal mengunggah video');
-      }
-    } catch (e) {
+      await refreshData();
+      showToast('Video bukti berhasil disimpan');
+      return true;
+    } catch {
       showToast('Gagal mengunggah video ke server');
+      return false;
     }
   };
 

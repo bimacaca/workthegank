@@ -57,31 +57,37 @@ export const TaskProofView: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const supportedExtension = /\.(mp4|webm|mov)$/i.test(file.name);
+      if (!supportedExtension || (file.type && !file.type.startsWith('video/'))) {
+        showToast('Pilih file video MP4, WEBM, atau MOV yang valid');
+        e.target.value = '';
+        setSelectedFile(null);
+        return;
+      }
+      if (file.size === 0 || file.size > 100 * 1024 * 1024) {
+        showToast('Ukuran video harus lebih dari 0 dan maksimal 100 MB');
+        e.target.value = '';
+        setSelectedFile(null);
+        return;
+      }
       setSelectedFile(file);
     }
   };
 
   const handleUploadSubmit = async () => {
+    if (!selectedFile) {
+      showToast('Pilih file video bukti terlebih dahulu');
+      return;
+    }
+
     setIsUploading(true);
     try {
-      if (selectedFile) {
-        await uploadProofVideo(activeTask.id, selectedFile);
+      const uploaded = await uploadProofVideo(activeTask.id, selectedFile);
+      if (uploaded) {
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
-      } else {
-        const sampleNames = [
-          'rekaman_layar_wa_batch_part1.mp4',
-          'rekaman_layar_wa_batch_part2.mp4',
-          'screen_record_done_bukti.mp4',
-        ];
-        const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-        await uploadProofVideo(activeTask.id, {
-          name: randomName,
-          size: `${(Math.random() * 25 + 15).toFixed(1)} MB`,
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        });
       }
     } finally {
       setIsUploading(false);
@@ -250,7 +256,7 @@ export const TaskProofView: React.FC = () => {
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept="video/mp4,video/webm,video/quicktime"
+                  accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
                   className="hidden"
                 />
 
@@ -259,7 +265,7 @@ export const TaskProofView: React.FC = () => {
                 </div>
 
                 <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1 break-all">
-                  {selectedFile ? selectedFile.name : 'Pilih satu atau beberapa video'}
+                  {selectedFile ? selectedFile.name : 'Pilih satu video'}
                 </div>
                 <div className="text-[11px] text-gray-400">
                   {selectedFile

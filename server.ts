@@ -5,14 +5,15 @@ import fs from 'fs';
 import multer from 'multer';
 import { spawn } from 'child_process';
 import os from 'os';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import ffmpegPath from 'ffmpeg-static';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
+import { isValidPhoneNumber, normalizePhone, phoneAppearsInOcr } from './server/videoNumberCheck.js';
 
 const app = express();
 const PORT = 3005;
-const OCR_MAX_FRAMES_PER_VIDEO = 60;
+const OCR_MAX_FRAMES_PER_VIDEO = 120;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
@@ -44,7 +45,8 @@ const storage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname) || '.mp4';
+    const requestedExtension = path.extname(file.originalname).toLowerCase();
+    const ext = ['.mp4', '.webm', '.mov'].includes(requestedExtension) ? requestedExtension : '.mp4';
     cb(null, `proof-${uniqueSuffix}${ext}`);
   },
 });
@@ -53,26 +55,21 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max
 });
 
-const normalizePhone = (value: string) => {
-  const cleaned = value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-  const digits = cleaned.replace(/\D/g, '');
-  if (!cleaned.startsWith('+') && digits.startsWith('08')) return `62${digits.slice(1)}`;
-  return digits;
-};
-
 async function getVideoDurationSeconds(videoPath: string): Promise<number> {
   if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
   return new Promise((resolve, reject) => {
-    const probe = spawn(ffmpegPath as string, ['-hide_banner', '-i', videoPath]);
+    const probe = spawn(ffmpegPath as string, [
+      '-hide_banner', '-i', videoPath, '-frames:v', '1', '-f', 'null', '-',
+    ]);
     let stderr = '';
     probe.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     probe.on('error', reject);
-    probe.on('close', () => {
+    probe.on('close', (code) => {
       const match = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
-      if (!match) {
-        reject(new Error('Durasi video tidak dapat dibaca'));
+      if (code !== 0 || !match || !/\bVideo:/i.test(stderr)) {
+        reject(new Error('File video tidak valid, tidak dapat dibaca, atau tidak memiliki frame video'));
         return;
       }
       const duration = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
@@ -85,55 +82,51 @@ async function getVideoDurationSeconds(videoPath: string): Promise<number> {
   });
 }
 
-async function extractTextFromVideo(videoPath: string): Promise<{ text: string; framesScanned: number }> {
+async function createOcrWorker() {
+  const worker = await createWorker('eng', 1, {
+    langPath: path.resolve(process.cwd(), 'node_modules/@tesseract.js-data/eng/4.0.0'),
+    gzip: true,
+  });
+  await worker.setParameters({
+    tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1',
+  });
+  return worker;
+}
+
+async function extractTextFromVideo(
+  videoPath: string,
+  worker: Awaited<ReturnType<typeof createOcrWorker>>
+): Promise<{ text: string; framesScanned: number }> {
   if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
   const duration = await getVideoDurationSeconds(videoPath);
-  const samplingRate = (OCR_MAX_FRAMES_PER_VIDEO / duration).toFixed(10);
+  const samplingRate = Math.min(2, OCR_MAX_FRAMES_PER_VIDEO / duration).toFixed(10);
   const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtg-ocr-'));
   try {
     await new Promise<void>((resolve, reject) => {
-      const process: any = spawn(ffmpegPath as string, [
-        '-i', videoPath, '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02`, '-frames:v', String(OCR_MAX_FRAMES_PER_VIDEO),
+      const process = spawn(ffmpegPath as string, [
+        '-hide_banner', '-loglevel', 'error', '-i', videoPath,
+        '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.2:brightness=0.02,unsharp=5:5:0.7:3:3:0.3`,
+        '-frames:v', String(OCR_MAX_FRAMES_PER_VIDEO),
         path.join(frameDir, 'frame-%03d.jpg'),
       ]);
       process.on('error', reject);
       process.on('close', (code: number) => code === 0 ? resolve() : reject(new Error('Gagal membaca video')));
     });
     const frames = fs.readdirSync(frameDir).filter((file) => file.endsWith('.jpg'));
-    const worker = await createWorker('eng', 1, {
-      langPath: path.resolve(process.cwd(), 'node_modules/@tesseract.js-data/eng/4.0.0'),
-      gzip: true,
-    });
-    try {
-      const text: string[] = [];
-      for (const frame of frames) {
-        const result = await worker.recognize(path.join(frameDir, frame), {}, { text: true });
-        text.push(result.data.text);
-      }
-      return { text: text.join('\n'), framesScanned: frames.length };
-    } finally {
-      await worker.terminate();
+    const text: string[] = [];
+    for (const frame of frames) {
+      const result = await worker.recognize(
+        path.join(frameDir, frame),
+        {},
+        { text: true }
+      );
+      text.push(result.data.text);
     }
+    return { text: text.join('\n'), framesScanned: frames.length };
   } finally {
     fs.rmSync(frameDir, { recursive: true, force: true });
   }
-}
-
-function phoneAppearsInOcr(recognizedText: string, phoneNumber: string): boolean {
-  const digits = normalizePhone(phoneNumber);
-  if (digits.length < 7) return false;
-
-  // A WhatsApp list may put a timestamp beside the phone on the same OCR line.
-  // Remove clock strings, then match the complete digit sequence. Do not
-  // globally convert letters such as O/S/B to digits; that creates false hits
-  // in unrelated interface text.
-  const lines = recognizedText
-    .replace(/\b\d{1,2}:\d{2}\b/g, ' ')
-    .split(/\r?\n/);
-  const numberPattern = [...digits].join('[\\s().-]*');
-  const exactNumber = new RegExp(`(?:^|[^\\d\\s().-])${numberPattern}(?![\\s().-]*\\d)`);
-
-  return lines.some((line) => exactNumber.test(line));
 }
 
 // Helper: Run query and return array of objects
@@ -635,6 +628,13 @@ app.post('/api/tasks', async (req, res) => {
     if (!numbers || !Array.isArray(numbers) || numbers.length === 0) {
       return res.status(400).json({ error: 'Daftar nomor harus diisi' });
     }
+    const normalizedNumbers = numbers.map((number: unknown) => normalizePhone(String(number ?? '')));
+    if (normalizedNumbers.some((number) => !isValidPhoneNumber(number))) {
+      return res.status(400).json({ error: 'Setiap nomor harus berisi 7–15 digit yang valid' });
+    }
+    if (new Set(normalizedNumbers).size !== normalizedNumbers.length) {
+      return res.status(400).json({ error: 'Daftar nomor tidak boleh berisi nomor duplikat' });
+    }
 
     const id = (Math.floor(1000 + Math.random() * 9000)).toString();
     const taskCode = code?.trim() || `batch_${batch || '01'}_task #${id.slice(-3)}`;
@@ -650,14 +650,12 @@ app.post('/api/tasks', async (req, res) => {
     );
 
     // Insert numbers
-    for (let i = 0; i < numbers.length; i++) {
-      const phone = normalizePhone(String(numbers[i]));
-
+    for (let i = 0; i < normalizedNumbers.length; i++) {
       const numId = `num-${id}-${i + 1}`;
       await execute(
         `INSERT INTO task_numbers (id, task_id, no, phone_number, status)
          VALUES (?, ?, ?, ?, 'pending')`,
-        [numId, id, i + 1, phone]
+        [numId, id, i + 1, normalizedNumbers[i]]
       );
     }
 
@@ -696,6 +694,31 @@ app.put('/api/tasks/:id', async (req, res) => {
       return res.status(404).json({ error: 'Task tidak ditemukan' });
     }
 
+    let normalizedNumbers: string[] | undefined;
+    if (numbers !== undefined) {
+      if (!Array.isArray(numbers)) {
+        return res.status(400).json({ error: 'Daftar nomor harus berupa array' });
+      }
+      normalizedNumbers = numbers.map((item: unknown) => {
+        if (typeof item === 'string') return normalizePhone(item);
+        if (item && typeof item === 'object' && 'phoneNumber' in item) {
+          return normalizePhone(String(item.phoneNumber ?? ''));
+        }
+        return '';
+      });
+      if (normalizedNumbers.some((number) => !isValidPhoneNumber(number))) {
+        return res.status(400).json({ error: 'Setiap nomor harus berisi 7–15 digit yang valid' });
+      }
+      if (new Set(normalizedNumbers).size !== normalizedNumbers.length) {
+        return res.status(400).json({ error: 'Daftar nomor tidak boleh berisi nomor duplikat' });
+      }
+      if (numbers.some((item: any) =>
+        item && item.status !== undefined && !['pending', 'done', 'failed'].includes(item.status)
+      )) {
+        return res.status(400).json({ error: 'Status nomor harus pending, done, atau failed' });
+      }
+    }
+
     if (code !== undefined || store !== undefined || batch !== undefined || content !== undefined || promoImageUrl !== undefined) {
       await execute(
         `UPDATE tasks
@@ -710,12 +733,10 @@ app.put('/api/tasks/:id', async (req, res) => {
     }
 
     // If numbers provided, replace or update
-    if (numbers && Array.isArray(numbers)) {
+    if (normalizedNumbers) {
       await execute('DELETE FROM task_numbers WHERE task_id = ?', [taskId]);
-      for (let i = 0; i < numbers.length; i++) {
+      for (let i = 0; i < normalizedNumbers.length; i++) {
         const item = numbers[i];
-        const phone = normalizePhone(String(typeof item === 'string' ? item : item.phoneNumber));
-
         const numId = `num-${taskId}-${i + 1}`;
         const status = (typeof item === 'object' && item.status) || 'pending';
         const reason = typeof item === 'object' ? item.failedReason || null : null;
@@ -723,7 +744,7 @@ app.put('/api/tasks/:id', async (req, res) => {
         await execute(
           `INSERT INTO task_numbers (id, task_id, no, phone_number, status, failed_reason)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          [numId, taskId, i + 1, phone, status, reason]
+          [numId, taskId, i + 1, normalizedNumbers[i], status, reason]
         );
       }
     }
@@ -798,6 +819,9 @@ app.post('/api/tasks/:id/numbers/:numberId', async (req, res) => {
   try {
     const { id: taskId, numberId } = req.params;
     const { status, failedReason } = req.body;
+    if (!['pending', 'done', 'failed'].includes(status)) {
+      return res.status(400).json({ error: 'Status nomor harus pending, done, atau failed' });
+    }
     const updatedAt = new Date().toISOString();
 
     await execute(
@@ -822,10 +846,20 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
   try {
     const task = await getFullTask(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task tidak ditemukan' });
-    const proofFiles = (task.proofVideos || [])
-      .map((video: any) => path.resolve(UPLOADS_DIR, path.basename(video.fileUrl || '')))
-      .filter((file: string) => fs.existsSync(file));
-    if (!proofFiles.length) return res.status(400).json({ error: 'Tidak ada video bukti lokal yang dapat diperiksa' });
+    const proofVideos = task.proofVideos || [];
+    const proofFiles = proofVideos.map((video: any) => {
+      const fileUrl = String(video.fileUrl || '');
+      return fileUrl.startsWith('/uploads/')
+        ? path.resolve(UPLOADS_DIR, path.basename(fileUrl))
+        : null;
+    });
+    if (!proofFiles.length) return res.status(400).json({ error: 'Tidak ada video bukti yang dapat diperiksa' });
+    if (proofFiles.some((file: string | null) => !file || !fs.existsSync(file))) {
+      return res.status(400).json({ error: 'Semua video bukti harus tersedia secara lokal agar hasil pemeriksaan lengkap' });
+    }
+    if (!task.numbers.length || task.numbers.some((number: any) => !isValidPhoneNumber(number.phoneNumber))) {
+      return res.status(400).json({ error: 'Task memiliki nomor kosong atau tidak valid; perbaiki daftar nomor sebelum memeriksa video' });
+    }
 
     const jobId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     numberCheckJobs.set(jobId, { status: 'processing', updatedAt: Date.now() });
@@ -836,7 +870,16 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
+        const worker = await createOcrWorker();
+        let videoScans: { text: string; framesScanned: number }[];
+        try {
+          videoScans = [];
+          for (const proofFile of proofFiles as string[]) {
+            videoScans.push(await extractTextFromVideo(proofFile, worker));
+          }
+        } finally {
+          await worker.terminate();
+        }
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
@@ -855,7 +898,7 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
             framesScanned,
             matched: matched.map((number: any) => number.phoneNumber),
             missing: missing.map((number: any) => number.phoneNumber),
-            note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame (maksimal ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR tidak menjamin akurasi 100%; periksa video secara langsung.`,
+            note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor cocok utuh pada ${framesScanned} frame (hingga ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Nomor lokal 08… dan format +62… disamakan; nomor yang menempel pada digit lain tidak dihitung. OCR tetap perlu dikonfirmasi dengan menonton video.`,
           };
           job.updatedAt = Date.now();
         }
@@ -884,34 +927,60 @@ app.get('/api/number-check-jobs/:jobId', (req, res) => {
 app.post('/api/tasks/:id/upload-proof', upload.single('video'), async (req, res) => {
   try {
     const taskId = req.params.id;
-    let fileName = '';
-    let fileSize = '';
-    let fileUrl = '';
-
-    if (req.file) {
-      fileName = req.file.originalname;
-      fileSize = `${(req.file.size / (1024 * 1024)).toFixed(1)} MB`;
-      fileUrl = `/uploads/${req.file.filename}`;
-    } else if (req.body.mockUrl) {
-      fileName = req.body.fileName || 'screen_recording_proof.mp4';
-      fileSize = req.body.fileSize || '24.5 MB';
-      fileUrl = req.body.mockUrl;
-    } else {
+    if (!req.file) {
       return res.status(400).json({ error: 'Tidak ada berkas video yang diunggah' });
     }
+    if (!/\.(mp4|webm|mov)$/i.test(req.file.originalname)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Format video harus MP4, WEBM, atau MOV' });
+    }
+    const task = await getFullTask(taskId);
+    if (!task) {
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Task tidak ditemukan' });
+    }
+    if (task.proofVideos.length >= 20) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Maksimal 20 video bukti untuk setiap task' });
+    }
+
+    let durationSeconds: number;
+    try {
+      durationSeconds = await getVideoDurationSeconds(req.file.path);
+    } catch (error) {
+      fs.unlinkSync(req.file.path);
+      const message = error instanceof Error ? error.message : 'File video tidak valid';
+      return res.status(400).json({ error: message });
+    }
+    const wholeSeconds = Math.floor(durationSeconds);
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const seconds = wholeSeconds % 60;
+    const duration = hours > 0
+      ? [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
+      : [minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
 
     const videoId = `vid-${Date.now()}`;
     const uploadedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
 
     await execute(
       `INSERT INTO proof_videos (id, task_id, file_name, file_size, file_url, duration, uploaded_at)
-       VALUES (?, ?, ?, ?, ?, '02:30', ?)`,
-      [videoId, taskId, fileName, fileSize, fileUrl, uploadedAt]
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        videoId,
+        taskId,
+        req.file.originalname,
+        `${(req.file.size / (1024 * 1024)).toFixed(1)} MB`,
+        `/uploads/${req.file.filename}`,
+        duration,
+        uploadedAt,
+      ]
     );
 
     const updated = await getFullTask(taskId);
     res.json(updated);
   } catch (err: any) {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     res.status(500).json({ error: err.message });
   }
 });
@@ -934,6 +1003,12 @@ app.post('/api/tasks/:id/submit', async (req, res) => {
     const taskId = req.params.id;
     const task = await getFullTask(taskId);
     if (!task) return res.status(404).json({ error: 'Task tidak ditemukan' });
+    if (!task.numbers.length || !task.numbers.every((number: any) => ['done', 'failed'].includes(number.status))) {
+      return res.status(400).json({ error: 'Semua nomor harus ditandai selesai atau gagal sebelum task dikirim' });
+    }
+    if (!task.proofVideos.length) {
+      return res.status(400).json({ error: 'Unggah minimal satu video bukti sebelum mengirim task' });
+    }
 
     const completedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
     await execute(
