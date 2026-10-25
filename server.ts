@@ -7,14 +7,17 @@ import { spawn } from 'child_process';
 import os from 'os';
 import { createWorker, PSM } from 'tesseract.js';
 import ffmpegPath from 'ffmpeg-static';
+import sharp from 'sharp';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
 import { isValidPhoneNumber, normalizePhone, phoneAppearsInOcr } from './server/videoNumberCheck.js';
+import { lookupWhatsAppProfilePictures } from './server/whatsappProfile.js';
 
 const app = express();
 const PORT = 3005;
 const JAKARTA_TIMEZONE = 'Asia/Jakarta';
 const OCR_MAX_FRAMES_PER_VIDEO = 120;
+const PROFILE_MATCH_THRESHOLD = 0.72;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
@@ -23,10 +26,46 @@ const numberCheckJobs = new Map<string, {
     matched: string[];
     missing: string[];
     note: string;
+    profilePictures?: { phoneNumber: string; profilePictureUrl?: string; status: string; detail?: string }[];
+    profileNote?: string;
   };
   error?: string;
   updatedAt: number;
 }>();
+
+async function imageHash(input: Buffer): Promise<number[]> {
+  const { data } = await sharp(input).resize(32, 32, { fit: 'fill' }).grayscale().raw().toBuffer({ resolveWithObject: true });
+  const average = data.reduce((sum, value) => sum + value, 0) / data.length;
+  return [...data].map((value) => value >= average ? 1 : 0);
+}
+
+function hashSimilarity(left: number[], right: number[]): number {
+  if (!left.length || left.length !== right.length) return 0;
+  return left.reduce((score, value, index) => score + (value === right[index] ? 1 : 0), 0) / left.length;
+}
+
+async function compareProfileWithVideos(profileUrl: string, videoFiles: string[]): Promise<{ matched: boolean; score: number }> {
+  const response = await fetch(profileUrl);
+  if (!response.ok) return { matched: false, score: 0 };
+  const profileHash = await imageHash(Buffer.from(await response.arrayBuffer()));
+  const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtg-profile-'));
+  try {
+    for (const videoFile of videoFiles) {
+      await new Promise<void>((resolve, reject) => {
+        const process = spawn(ffmpegPath as string, ['-hide_banner', '-loglevel', 'error', '-i', videoFile, '-vf', 'fps=1,scale=320:-2', '-frames:v', '30', path.join(frameDir, `${Math.random().toString(36).slice(2)}-%02d.jpg`)]);
+        process.on('error', reject);
+        process.on('close', (code) => code === 0 ? resolve() : reject(new Error('Gagal mengambil frame untuk pencocokan foto')));
+      });
+    }
+    let bestScore = 0;
+    for (const frame of fs.readdirSync(frameDir).filter((file) => file.endsWith('.jpg'))) {
+      bestScore = Math.max(bestScore, hashSimilarity(profileHash, await imageHash(fs.readFileSync(path.join(frameDir, frame)))));
+    }
+    return { matched: bestScore >= PROFILE_MATCH_THRESHOLD, score: Number(bestScore.toFixed(3)) };
+  } finally {
+    fs.rmSync(frameDir, { recursive: true, force: true });
+  }
+}
 
 function getJakartaDate(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -919,6 +958,22 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
         const missing = taskNumbers.filter((number: any) =>
           !videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
         );
+        // Foto profil hanya dicari untuk nomor yang sudah lolos pencocokan OCR.
+        const profileLookup = await lookupWhatsAppProfilePictures(matched.map((number: any) => number.phoneNumber));
+        for (const profile of profileLookup.results) {
+          if (profile.status === 'matched' && profile.profilePictureUrl) {
+            try {
+              const comparison = await compareProfileWithVideos(profile.profilePictureUrl, proofFiles as string[]);
+              profile.status = comparison.matched ? 'matched' : 'not_found';
+              profile.detail = comparison.matched
+                ? `Foto Profil Cocok dengan video (skor ${(comparison.score * 100).toFixed(0)}%)`
+                : `Foto profil tidak cocok dengan frame video (skor ${(comparison.score * 100).toFixed(0)}%)`;
+            } catch (error: any) {
+              profile.status = 'error';
+              profile.detail = `Pencocokan foto gagal: ${error.message}`;
+            }
+          }
+        }
         const job = numberCheckJobs.get(jobId);
         if (job) {
           job.status = 'completed';
@@ -927,6 +982,8 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
             framesScanned,
             matched: matched.map((number: any) => number.phoneNumber),
             missing: missing.map((number: any) => number.phoneNumber),
+            profilePictures: profileLookup.results,
+            profileNote: profileLookup.note,
             note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor cocok utuh pada ${framesScanned} frame (hingga ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Nomor lokal 08… dan format +62… disamakan; nomor yang menempel pada digit lain tidak dihitung. OCR tetap perlu dikonfirmasi dengan menonton video.`,
           };
           job.updatedAt = Date.now();

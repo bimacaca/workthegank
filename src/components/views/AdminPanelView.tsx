@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Sparkles,
   LogOut,
+  Camera,
 } from 'lucide-react';
 import { Task, NumberStatus } from '../../types';
 
@@ -73,6 +74,8 @@ export const AdminPanelView: React.FC = () => {
   const [numberCheckResult, setNumberCheckResult] = useState<{
     checkedVideos: number; framesScanned: number;
     matched: string[]; missing: string[]; note: string;
+    profilePictures?: { phoneNumber: string; profilePictureUrl?: string; status: string; detail?: string }[];
+    profileNote?: string;
   } | null>(null);
 
   const checkNumbersInVideo = async (taskId: string) => {
@@ -622,6 +625,18 @@ didaftarin> https://cutt.ly/WhatsapLENA
                                 <p className="text-emerald-800 break-all">
                                   <b>Nomor cocok:</b> {numberCheckResult.matched.map(formatPhoneForDisplay).join(', ')}
                                 </p>
+                              )}
+                              {numberCheckResult.matched.length > 0 && (
+                                <div className="mt-2 border-t border-blue-200 pt-2 space-y-2">
+                                  <p className="font-semibold text-blue-900 flex items-center gap-1.5"><Camera className="w-3.5 h-3.5" /> Foto Profil Cocok:</p>
+                                  {numberCheckResult.profilePictures?.map((profile) => (
+                                    <div key={profile.phoneNumber} className="flex items-center gap-2 rounded-lg bg-white/70 border border-blue-100 p-1.5">
+                                      {profile.profilePictureUrl ? <img src={profile.profilePictureUrl} alt={`Foto profil ${profile.phoneNumber}`} className="w-9 h-9 rounded-full object-cover" /> : <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center"><Camera className="w-4 h-4 text-gray-400" /></div>}
+                                      <div className="min-w-0"><p className="font-medium">{formatPhoneForDisplay(profile.phoneNumber)}</p><p className={`text-[10px] ${profile.status === 'matched' ? 'text-emerald-700' : 'text-gray-500'}`}>{profile.detail}</p></div>
+                                    </div>
+                                  ))}
+                                  {numberCheckResult.profileNote && <p className="text-[10px] text-gray-500">{numberCheckResult.profileNote}</p>}
+                                </div>
                               )}
                               {numberCheckResult.missing.length > 0 && <p className="text-rose-700 break-all">Belum terdeteksi: {numberCheckResult.missing.join(', ')}</p>}
                               <p className="text-[11px] text-gray-500">Nomor asing tidak ditampilkan karena OCR dapat menyatukan nomor dengan waktu atau teks lain di layar.</p>
