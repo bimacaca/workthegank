@@ -11,7 +11,7 @@ import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3005;
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
