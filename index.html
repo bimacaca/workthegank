@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // AI Studio preview environment: suppress known benign HMR WebSocket connection errors
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
+        if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('@vite/client') !== -1 || msg.indexOf('createWebSocketModuleRunnerTransport') !== -1) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        var msg = (event.message || '') + ' ' + (event.filename || '');
+        if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('@vite/client') !== -1 || msg.indexOf('createWebSocketModuleRunnerTransport') !== -1) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
+      });
+    </script>
+    <title>Work The Gank - Task & Review System</title>
+    <meta name="description" content="Sistem manajemen antrean task, pengerjaan nomor kontak, pengunggahan video bukti, dan panel admin untuk tambah/edit task, nomor, konten, serta verifikasi tinjauan video." />
+    <meta property="og:title" content="Work The Gank - Task & Review System" />
+    <meta property="og:description" content="Sistem manajemen antrean task, pengerjaan nomor kontak, pengunggahan video bukti, dan panel admin untuk tambah/edit task, nomor, konten, serta verifikasi tinjauan video." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

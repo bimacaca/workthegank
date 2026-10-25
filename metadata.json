@@ -1,0 +1,6 @@
+{
+  "name": "Work The Gank - Task & Review System",
+  "description": "Sistem manajemen antrean task, pengerjaan nomor kontak, pengunggahan video bukti, dan panel admin untuk tambah/edit task, nomor, konten, serta verifikasi tinjauan video.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

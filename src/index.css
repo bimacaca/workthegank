@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/* One restrained blue palette for the whole product. */
+@theme {
+  --color-teal-50: #eff6ff;
+  --color-teal-100: #dbeafe;
+  --color-teal-200: #bfdbfe;
+  --color-teal-300: #93c5fd;
+  --color-teal-400: #60a5fa;
+  --color-teal-500: #3b82f6;
+  --color-teal-600: #2563eb;
+  --color-teal-700: #1d4ed8;
+  --color-teal-800: #1e40af;
+  --color-teal-900: #1e3a8a;
+  --color-emerald-50: #eff6ff;
+  --color-emerald-100: #dbeafe;
+  --color-emerald-200: #bfdbfe;
+  --color-emerald-300: #93c5fd;
+  --color-emerald-400: #60a5fa;
+  --color-emerald-500: #3b82f6;
+  --color-emerald-600: #2563eb;
+  --color-emerald-700: #1d4ed8;
+  --color-emerald-800: #1e40af;
+  --color-emerald-900: #1e3a8a;
+  --color-green-50: #eff6ff;
+  --color-green-100: #dbeafe;
+  --color-green-200: #bfdbfe;
+  --color-green-300: #93c5fd;
+  --color-green-400: #60a5fa;
+  --color-green-500: #3b82f6;
+  --color-green-600: #2563eb;
+  --color-green-700: #1d4ed8;
+  --color-green-800: #1e40af;
+  --color-green-900: #1e3a8a;
+  --color-amber-50: #eff6ff;
+  --color-amber-100: #dbeafe;
+  --color-amber-200: #bfdbfe;
+  --color-amber-300: #93c5fd;
+  --color-amber-400: #60a5fa;
+  --color-amber-500: #3b82f6;
+  --color-amber-600: #2563eb;
+  --color-amber-700: #1d4ed8;
+  --color-amber-800: #1e40af;
+  --color-amber-900: #1e3a8a;
+  --color-orange-50: #eff6ff;
+  --color-orange-100: #dbeafe;
+  --color-orange-200: #bfdbfe;
+  --color-orange-300: #93c5fd;
+  --color-orange-400: #60a5fa;
+  --color-orange-500: #3b82f6;
+  --color-orange-600: #2563eb;
+  --color-orange-700: #1d4ed8;
+  --color-orange-800: #1e40af;
+  --color-orange-900: #1e3a8a;
+}
+
+/* Existing arbitrary teal values, kept compatible while rendered as blue. */
+[class*="bg-[#127369]"] { background-color: #2563eb !important; }
+[class*="bg-[#e6f5f3]"] { background-color: #eff6ff !important; }
+[class*="text-[#127369]"], [class*="text-[#0f544d]"] { color: #1e40af !important; }
+[class*="border-[#127369]"] { border-color: #93c5fd !important; }
+[class*="hover:bg-[#0f6057]"]:hover { background-color: #1d4ed8 !important; }
+[class*="active:bg-[#0d534b]"]:active { background-color: #1e40af !important; }
+
+/* Keep hierarchy in spacing and type, not decorative shadows. */
+button, .shadow-xs, .shadow-2xs, .shadow-sm {
+  box-shadow: none !important;
+}
