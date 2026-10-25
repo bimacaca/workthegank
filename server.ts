@@ -47,13 +47,40 @@ const normalizePhone = (value: string) => {
   return digits;
 };
 
+async function getVideoDurationSeconds(videoPath: string): Promise<number> {
+  if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
+  return new Promise((resolve, reject) => {
+    const probe = spawn(ffmpegPath as string, ['-hide_banner', '-i', videoPath]);
+    let stderr = '';
+    probe.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    probe.on('error', reject);
+    probe.on('close', () => {
+      const match = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+      if (!match) {
+        reject(new Error('Durasi video tidak dapat dibaca'));
+        return;
+      }
+      const duration = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error('Durasi video tidak valid'));
+        return;
+      }
+      resolve(duration);
+    });
+  });
+}
+
 async function extractTextFromVideo(videoPath: string): Promise<{ text: string; framesScanned: number }> {
   if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
+  const duration = await getVideoDurationSeconds(videoPath);
+  const samplingRate = (200 / duration).toFixed(10);
   const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtg-ocr-'));
   try {
     await new Promise<void>((resolve, reject) => {
       const process: any = spawn(ffmpegPath as string, [
-        '-i', videoPath, '-vf', 'fps=1,scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02', '-frames:v', '180',
+        '-i', videoPath, '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02`, '-frames:v', '200',
         path.join(frameDir, 'frame-%03d.jpg'),
       ]);
       process.on('error', reject);
