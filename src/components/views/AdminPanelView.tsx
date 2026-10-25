@@ -224,8 +224,9 @@ didaftarin> https://cutt.ly/WhatsapLENA
 
   const handleAddNumberToEdit = () => {
     if (!newNumberToAdd.trim()) return;
-    let clean = newNumberToAdd.replace(/\D/g, '');
-    if (clean.startsWith('08')) {
+    const cleanedInput = newNumberToAdd.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    let clean = cleanedInput.replace(/\D/g, '');
+    if (!cleanedInput.startsWith('+') && clean.startsWith('08')) {
       clean = '62' + clean.slice(1);
     }
 

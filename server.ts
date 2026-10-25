@@ -41,9 +41,10 @@ const upload = multer({
 });
 
 const normalizePhone = (value: string) => {
-  const digits = value.replace(/\D/g, '');
-  if (digits.startsWith('0')) return `62${digits.slice(1)}`;
-  return digits.startsWith('62') ? digits : digits;
+  const cleaned = value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const digits = cleaned.replace(/\D/g, '');
+  if (!cleaned.startsWith('+') && digits.startsWith('08')) return `62${digits.slice(1)}`;
+  return digits;
 };
 
 async function extractTextFromVideo(videoPath: string): Promise<string> {
@@ -570,10 +571,7 @@ app.post('/api/tasks', async (req, res) => {
 
     // Insert numbers
     for (let i = 0; i < numbers.length; i++) {
-      let phone = String(numbers[i]).replace(/\D/g, '');
-      if (phone.startsWith('08')) {
-        phone = '62' + phone.slice(1);
-      }
+      const phone = normalizePhone(String(numbers[i]));
 
       const numId = `num-${id}-${i + 1}`;
       await execute(
@@ -636,11 +634,7 @@ app.put('/api/tasks/:id', async (req, res) => {
       await execute('DELETE FROM task_numbers WHERE task_id = ?', [taskId]);
       for (let i = 0; i < numbers.length; i++) {
         const item = numbers[i];
-        let phone = typeof item === 'string' ? item : item.phoneNumber;
-        phone = String(phone).replace(/\D/g, '');
-        if (phone.startsWith('08')) {
-          phone = '62' + phone.slice(1);
-        }
+        const phone = normalizePhone(String(typeof item === 'string' ? item : item.phoneNumber));
 
         const numId = `num-${taskId}-${i + 1}`;
         const status = (typeof item === 'object' && item.status) || 'pending';
