@@ -415,7 +415,30 @@ app.delete('/api/admin/:id', async (req, res) => {
 // 1. Get all operators
 app.get('/api/operators', async (_req, res) => {
   try {
-    const rows = await queryAll('SELECT * FROM operators ORDER BY created_at ASC');
+    const rows = await queryAll(`
+      SELECT
+        o.id,
+        o.name,
+        o.created_at,
+        o.is_active,
+        o.pin,
+        COUNT(DISTINCT CASE
+          WHEN t.status IN ('submitted', 'approved', 'rejected') THEN t.id
+        END) AS total_completed_tasks,
+        COALESCE(SUM(CASE
+          WHEN t.status IN ('submitted', 'approved', 'rejected') AND n.status = 'done' THEN 1
+          ELSE 0
+        END), 0) AS total_completed_numbers,
+        COALESCE(SUM(CASE
+          WHEN t.status IN ('submitted', 'approved', 'rejected') AND n.status = 'failed' THEN 1
+          ELSE 0
+        END), 0) AS total_failed_numbers
+      FROM operators o
+      LEFT JOIN tasks t ON LOWER(t.operator_name) = LOWER(o.name)
+      LEFT JOIN task_numbers n ON n.task_id = t.id
+      GROUP BY o.id
+      ORDER BY o.created_at ASC
+    `);
     res.json(
       rows.map((operator) => ({
         id: operator.id,
@@ -877,21 +900,6 @@ app.post('/api/tasks/:id/submit', async (req, res) => {
        WHERE id = ?`,
       [completedAt, completedAt, taskId]
     );
-
-    // Update operator stats
-    if (task.operator_name) {
-      const doneCount = task.numbers.filter((n: any) => n.status === 'done').length;
-      const failCount = task.numbers.filter((n: any) => n.status === 'failed').length;
-
-      await execute(
-        `UPDATE operators
-         SET total_completed_tasks = total_completed_tasks + 1,
-             total_completed_numbers = total_completed_numbers + ?,
-             total_failed_numbers = total_failed_numbers + ?
-         WHERE name = ?`,
-        [doneCount, failCount, task.operator_name]
-      );
-    }
 
     const updated = await getFullTask(taskId);
     res.json(updated);

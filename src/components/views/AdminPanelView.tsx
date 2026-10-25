@@ -80,8 +80,18 @@ export const AdminPanelView: React.FC = () => {
     setNumberCheckResult(null);
     try {
       const response = await fetch(`/api/tasks/${taskId}/check-numbers`, { method: 'POST' });
-      const result = await response.json();
+      const responseText = await response.text();
+      let result: any;
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        const detail = responseText.replace(/<[^>]*>/g, ' ').trim().slice(0, 180);
+        throw new Error(detail || `Respons server tidak valid (HTTP ${response.status})`);
+      }
       if (!response.ok) throw new Error(result.error || 'Pengecekan gagal');
+      if (!Array.isArray(result.matched) || !Array.isArray(result.missing)) {
+        throw new Error('Format hasil pemeriksaan nomor tidak valid');
+      }
       setNumberCheckResult(result);
       setApprovalNotes(result.note);
     } catch (error: any) {
