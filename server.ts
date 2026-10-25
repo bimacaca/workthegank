@@ -12,6 +12,7 @@ import { getDb, saveDb } from './server/db.js';
 
 const app = express();
 const PORT = 3005;
+const OCR_MAX_FRAMES_PER_VIDEO = 60;
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
@@ -75,12 +76,12 @@ async function getVideoDurationSeconds(videoPath: string): Promise<number> {
 async function extractTextFromVideo(videoPath: string): Promise<{ text: string; framesScanned: number }> {
   if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
   const duration = await getVideoDurationSeconds(videoPath);
-  const samplingRate = (200 / duration).toFixed(10);
+  const samplingRate = (OCR_MAX_FRAMES_PER_VIDEO / duration).toFixed(10);
   const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtg-ocr-'));
   try {
     await new Promise<void>((resolve, reject) => {
       const process: any = spawn(ffmpegPath as string, [
-        '-i', videoPath, '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02`, '-frames:v', '200',
+        '-i', videoPath, '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02`, '-frames:v', String(OCR_MAX_FRAMES_PER_VIDEO),
         path.join(frameDir, 'frame-%03d.jpg'),
       ]);
       process.on('error', reject);
@@ -829,7 +830,7 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
       framesScanned,
       matched: matched.map((number: any) => number.phoneNumber),
       missing: missing.map((number: any) => number.phoneNumber),
-      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame. Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR masih dapat keliru; periksa video secara langsung.`,
+      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame (maksimal ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR tidak menjamin akurasi 100%; periksa video secara langsung.`,
     });
   } catch (err: any) {
     res.status(500).json({ error: `Pengecekan nomor gagal: ${err.message}` });
