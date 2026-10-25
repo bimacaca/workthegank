@@ -13,6 +13,18 @@ import { getDb, saveDb } from './server/db.js';
 const app = express();
 const PORT = 3005;
 const OCR_MAX_FRAMES_PER_VIDEO = 60;
+const numberCheckJobs = new Map<string, {
+  status: 'processing' | 'completed' | 'failed';
+  result?: {
+    checkedVideos: number;
+    framesScanned: number;
+    matched: string[];
+    missing: string[];
+    note: string;
+  };
+  error?: string;
+  updatedAt: number;
+}>();
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
@@ -804,8 +816,8 @@ app.post('/api/tasks/:id/numbers/:numberId', async (req, res) => {
   }
 });
 
-// Admin helper only: read locally stored proof videos and compare visible numbers.
-// This never changes a task status or review decision.
+// Admin helper only: run OCR outside the HTTP request so long videos don't
+// keep the request open until a hosting proxy returns a 504 timeout.
 app.post('/api/tasks/:id/check-numbers', async (req, res) => {
   try {
     const task = await getFullTask(req.params.id);
@@ -815,26 +827,57 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
       .filter((file: string) => fs.existsSync(file));
     if (!proofFiles.length) return res.status(400).json({ error: 'Tidak ada video bukti lokal yang dapat diperiksa' });
 
-    const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
-    const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
-    const taskNumbers = task.numbers.map((number: any) => ({ id: number.id, phoneNumber: normalizePhone(number.phoneNumber) }));
-    const matched = taskNumbers.filter((number: any) =>
-      videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
-    );
-    const missing = taskNumbers.filter((number: any) =>
-      !videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
-    );
+    const jobId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    numberCheckJobs.set(jobId, { status: 'processing', updatedAt: Date.now() });
+    for (const [oldJobId, job] of numberCheckJobs) {
+      if (Date.now() - job.updatedAt > 30 * 60 * 1000) numberCheckJobs.delete(oldJobId);
+    }
+    res.status(202).json({ jobId, status: 'processing' });
 
-    res.json({
-      checkedVideos: proofFiles.length,
-      framesScanned,
-      matched: matched.map((number: any) => number.phoneNumber),
-      missing: missing.map((number: any) => number.phoneNumber),
-      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame (maksimal ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR tidak menjamin akurasi 100%; periksa video secara langsung.`,
+    setImmediate(async () => {
+      try {
+        const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
+        const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
+        const taskNumbers = task.numbers.map((number: any) => ({
+          phoneNumber: normalizePhone(number.phoneNumber),
+        }));
+        const matched = taskNumbers.filter((number: any) =>
+          videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
+        );
+        const missing = taskNumbers.filter((number: any) =>
+          !videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
+        );
+        const job = numberCheckJobs.get(jobId);
+        if (job) {
+          job.status = 'completed';
+          job.result = {
+            checkedVideos: proofFiles.length,
+            framesScanned,
+            matched: matched.map((number: any) => number.phoneNumber),
+            missing: missing.map((number: any) => number.phoneNumber),
+            note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame (maksimal ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR tidak menjamin akurasi 100%; periksa video secara langsung.`,
+          };
+          job.updatedAt = Date.now();
+        }
+      } catch (err: any) {
+        const job = numberCheckJobs.get(jobId);
+        if (job) {
+          job.status = 'failed';
+          job.error = `Pengecekan nomor gagal: ${err.message}`;
+          job.updatedAt = Date.now();
+        }
+      }
     });
   } catch (err: any) {
     res.status(500).json({ error: `Pengecekan nomor gagal: ${err.message}` });
   }
+});
+
+app.get('/api/number-check-jobs/:jobId', (req, res) => {
+  const job = numberCheckJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Pekerjaan pemeriksaan tidak ditemukan atau sudah kedaluwarsa' });
+  if (job.status === 'failed') return res.status(500).json({ status: job.status, error: job.error });
+  res.json({ status: job.status, ...(job.result ? { result: job.result } : {}) });
 });
 
 // 11. Upload Video Proof (Real Multer Upload)

@@ -80,15 +80,32 @@ export const AdminPanelView: React.FC = () => {
     setNumberCheckResult(null);
     try {
       const response = await fetch(`/api/tasks/${taskId}/check-numbers`, { method: 'POST' });
-      const responseText = await response.text();
+      const parseResponse = async (res: Response) => {
+        const responseText = await res.text();
+        try {
+          return responseText ? JSON.parse(responseText) : {};
+        } catch {
+          const detail = responseText.replace(/<[^>]*>/g, ' ').trim().slice(0, 180);
+          throw new Error(detail || `Respons server tidak valid (HTTP ${res.status})`);
+        }
+      };
+      const started = await parseResponse(response);
+      if (!response.ok) throw new Error(started.error || 'Pengecekan gagal');
+      if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
+
       let result: any;
-      try {
-        result = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        const detail = responseText.replace(/<[^>]*>/g, ' ').trim().slice(0, 180);
-        throw new Error(detail || `Respons server tidak valid (HTTP ${response.status})`);
+      const deadline = Date.now() + 20 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
+        const status = await parseResponse(statusResponse);
+        if (!statusResponse.ok) throw new Error(status.error || 'Pengecekan gagal');
+        if (status.status === 'completed') {
+          result = status.result;
+          break;
+        }
       }
-      if (!response.ok) throw new Error(result.error || 'Pengecekan gagal');
+      if (!result) throw new Error('Pemeriksaan masih berjalan terlalu lama. Coba periksa kembali nanti.');
       if (!Array.isArray(result.matched) || !Array.isArray(result.missing)) {
         throw new Error('Format hasil pemeriksaan nomor tidak valid');
       }
