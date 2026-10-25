@@ -66,7 +66,7 @@ export const AdminPanelView: React.FC = () => {
   const [isCheckingNumbers, setIsCheckingNumbers] = useState(false);
   const [numberCheckResult, setNumberCheckResult] = useState<{
     checkedVideos: number; framesScanned: number;
-    matched: string[]; missing: string[]; unexpected: string[]; note: string;
+    matched: string[]; missing: string[]; note: string;
   } | null>(null);
 
   const checkNumbersInVideo = async (taskId: string) => {
@@ -535,9 +535,9 @@ didaftarin> https://cutt.ly/WhatsapLENA
                           {numberCheckResult && (
                             <div className="text-xs text-gray-700 space-y-1 border-t border-blue-200 pt-2">
                               <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame dipindai</p>
-                              <p><b>{numberCheckResult.matched.length}</b> cocok · <b>{numberCheckResult.missing.length}</b> belum terdeteksi · <b>{numberCheckResult.unexpected.length}</b> nomor asing</p>
+                              <p><b>{numberCheckResult.matched.length}</b> cocok · <b>{numberCheckResult.missing.length}</b> belum terdeteksi</p>
                               {numberCheckResult.missing.length > 0 && <p className="text-rose-700 break-all">Belum terdeteksi: {numberCheckResult.missing.join(', ')}</p>}
-                              {numberCheckResult.unexpected.length > 0 && <p className="text-blue-800 break-all">Nomor asing: {numberCheckResult.unexpected.join(', ')}</p>}
+                              <p className="text-[11px] text-gray-500">Nomor asing tidak ditampilkan karena OCR dapat menyatukan nomor dengan waktu atau teks lain di layar.</p>
                             </div>
                           )}
                         </div>

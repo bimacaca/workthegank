@@ -91,10 +91,12 @@ function extractPhoneCandidates(recognizedText: string): string[] {
   // Phone numbers are often split across OCR lines; test each line and its neighbor.
   for (let i = 0; i < lines.length; i++) {
     const line = [lines[i], lines[i + 1]].filter(Boolean).join(' ');
-    const matches = line.matchAll(/(?:^|[^\d])(\+?\d(?:[\s().-]*\d){6,14})(?!\d)/g);
+    const matches = line.matchAll(/(?:^|[^\d])(\+?\d[\d\s().:+-]{5,}\d)(?!\d)/g);
     for (const match of matches) {
       const digits = match[1].replace(/\D/g, '');
-      if (digits.length >= 7 && digits.length <= 15) candidates.add(normalizePhone(digits));
+      // Keep longer OCR groups too: a timestamp or chat-list counter may be
+      // joined to the end of a phone number by OCR.
+      if (digits.length >= 7 && digits.length <= 24) candidates.add(digits);
     }
   }
 
@@ -772,19 +774,20 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
     const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
     const recognizedText = videoScans.map((scan) => scan.text).join('\n');
     const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
-    const detected = extractPhoneCandidates(recognizedText);
+    const detectedGroups = extractPhoneCandidates(recognizedText);
     const taskNumbers = task.numbers.map((number: any) => ({ id: number.id, phoneNumber: normalizePhone(number.phoneNumber) }));
-    const matched = taskNumbers.filter((number: any) => detected.includes(number.phoneNumber));
-    const missing = taskNumbers.filter((number: any) => !detected.includes(number.phoneNumber));
-    const unexpected = detected.filter((number) => !taskNumbers.some((taskNumber: any) => taskNumber.phoneNumber === number));
+    const groupsWithTaskNumbers = detectedGroups.filter((group) =>
+      taskNumbers.some((number: any) => group.includes(number.phoneNumber))
+    );
+    const matched = taskNumbers.filter((number: any) => groupsWithTaskNumbers.some((group) => group.includes(number.phoneNumber)));
+    const missing = taskNumbers.filter((number: any) => !groupsWithTaskNumbers.some((group) => group.includes(number.phoneNumber)));
 
     res.json({
       checkedVideos: proofFiles.length,
       framesScanned,
       matched: matched.map((number: any) => number.phoneNumber),
       missing: missing.map((number: any) => number.phoneNumber),
-      unexpected,
-      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok dari ${framesScanned} frame video. Hasil OCR dapat keliru dan hanya bantuan tinjauan; periksa video sebelum mengambil keputusan.`,
+      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task terdeteksi pada ${framesScanned} frame. OCR dapat menyatukan nomor dengan waktu atau teks layar; hasil ini tidak mengidentifikasi nomor asing dengan andal, jadi periksa video secara langsung.`,
     });
   } catch (err: any) {
     res.status(500).json({ error: `Pengecekan nomor gagal: ${err.message}` });
