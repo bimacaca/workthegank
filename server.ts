@@ -573,8 +573,6 @@ app.post('/api/tasks', async (req, res) => {
       let phone = String(numbers[i]).replace(/\D/g, '');
       if (phone.startsWith('08')) {
         phone = '62' + phone.slice(1);
-      } else if (!phone.startsWith('62') && phone.length > 8) {
-        phone = '62' + phone;
       }
 
       const numId = `num-${id}-${i + 1}`;
@@ -642,8 +640,6 @@ app.put('/api/tasks/:id', async (req, res) => {
         phone = String(phone).replace(/\D/g, '');
         if (phone.startsWith('08')) {
           phone = '62' + phone.slice(1);
-        } else if (!phone.startsWith('62') && phone.length > 8) {
-          phone = '62' + phone;
         }
 
         const numId = `num-${taskId}-${i + 1}`;

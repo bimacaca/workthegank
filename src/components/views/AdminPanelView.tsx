@@ -227,8 +227,6 @@ didaftarin> https://cutt.ly/WhatsapLENA
     let clean = newNumberToAdd.replace(/\D/g, '');
     if (clean.startsWith('08')) {
       clean = '62' + clean.slice(1);
-    } else if (!clean.startsWith('62')) {
-      clean = '62' + clean;
     }
 
     setEditNumbers((prev) => [
@@ -742,12 +740,12 @@ didaftarin> https://cutt.ly/WhatsapLENA
                     rows={7}
                     value={rawNumbersInput}
                     onChange={(e) => setRawNumbersInput(e.target.value)}
-                    placeholder="082234594977&#10;081253203314&#10;..."
+                    placeholder="082234594977&#10;85267041592&#10;+1 202 555 0123"
                     required
                     className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-600 leading-relaxed"
                   />
                   <p className="text-[11px] text-gray-400">
-                    Sistem otomatis mengonversi awalan 08 menjadi format internasional 628.
+                    Nomor internasional diterima. Nomor lokal Indonesia berawalan 08 otomatis diubah menjadi 628; kode negara lain, misalnya 852, tetap dipertahankan.
                   </p>
                 </div>
 
