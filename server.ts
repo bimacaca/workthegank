@@ -79,28 +79,21 @@ async function extractTextFromVideo(videoPath: string): Promise<{ text: string; 
   }
 }
 
-function extractPhoneCandidates(recognizedText: string): string[] {
-  const normalizeOcrDigits = (value: string) => value.toUpperCase()
-    .replace(/[OQD]/g, '0')
-    .replace(/[IL|]/g, '1')
-    .replace(/S/g, '5')
-    .replace(/B/g, '8');
-  const lines = normalizeOcrDigits(recognizedText).split(/\r?\n/);
-  const candidates = new Set<string>();
+function phoneAppearsInOcr(recognizedText: string, phoneNumber: string): boolean {
+  const digits = normalizePhone(phoneNumber);
+  if (digits.length < 7) return false;
 
-  // Phone numbers are often split across OCR lines; test each line and its neighbor.
-  for (let i = 0; i < lines.length; i++) {
-    const line = [lines[i], lines[i + 1]].filter(Boolean).join(' ');
-    const matches = line.matchAll(/(?:^|[^\d])(\+?\d[\d\s().:+-]{5,}\d)(?!\d)/g);
-    for (const match of matches) {
-      const digits = match[1].replace(/\D/g, '');
-      // Keep longer OCR groups too: a timestamp or chat-list counter may be
-      // joined to the end of a phone number by OCR.
-      if (digits.length >= 7 && digits.length <= 24) candidates.add(digits);
-    }
-  }
+  // A WhatsApp list may put a timestamp beside the phone on the same OCR line.
+  // Remove clock strings, then match the complete digit sequence. Do not
+  // globally convert letters such as O/S/B to digits; that creates false hits
+  // in unrelated interface text.
+  const lines = recognizedText
+    .replace(/\b\d{1,2}:\d{2}\b/g, ' ')
+    .split(/\r?\n/);
+  const numberPattern = [...digits].join('[\\s().-]*');
+  const exactNumber = new RegExp(`(?:^|[^\\d\\s().-])${numberPattern}(?![\\s().-]*\\d)`);
 
-  return [...candidates];
+  return lines.some((line) => exactNumber.test(line));
 }
 
 // Helper: Run query and return array of objects
@@ -772,22 +765,21 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
     if (!proofFiles.length) return res.status(400).json({ error: 'Tidak ada video bukti lokal yang dapat diperiksa' });
 
     const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
-    const recognizedText = videoScans.map((scan) => scan.text).join('\n');
     const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
-    const detectedGroups = extractPhoneCandidates(recognizedText);
     const taskNumbers = task.numbers.map((number: any) => ({ id: number.id, phoneNumber: normalizePhone(number.phoneNumber) }));
-    const groupsWithTaskNumbers = detectedGroups.filter((group) =>
-      taskNumbers.some((number: any) => group.includes(number.phoneNumber))
+    const matched = taskNumbers.filter((number: any) =>
+      videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
     );
-    const matched = taskNumbers.filter((number: any) => groupsWithTaskNumbers.some((group) => group.includes(number.phoneNumber)));
-    const missing = taskNumbers.filter((number: any) => !groupsWithTaskNumbers.some((group) => group.includes(number.phoneNumber)));
+    const missing = taskNumbers.filter((number: any) =>
+      !videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
+    );
 
     res.json({
       checkedVideos: proofFiles.length,
       framesScanned,
       matched: matched.map((number: any) => number.phoneNumber),
       missing: missing.map((number: any) => number.phoneNumber),
-      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task terdeteksi pada ${framesScanned} frame. OCR dapat menyatukan nomor dengan waktu atau teks layar; hasil ini tidak mengidentifikasi nomor asing dengan andal, jadi periksa video secara langsung.`,
+      note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame. Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR masih dapat keliru; periksa video secara langsung.`,
     });
   } catch (err: any) {
     res.status(500).json({ error: `Pengecekan nomor gagal: ${err.message}` });

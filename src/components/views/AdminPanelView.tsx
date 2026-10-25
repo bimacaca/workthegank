@@ -24,6 +24,12 @@ const formatPhoneForDisplay = (phoneNumber: string) => {
   return digits && !digits.startsWith('62') ? `+${digits}` : digits;
 };
 
+const parsePhoneNumbers = (value: string) =>
+  value
+    .split(/[\r\n,;]+/)
+    .map((number) => number.trim())
+    .filter((number) => number.replace(/\D/g, '').length > 5);
+
 export const AdminPanelView: React.FC = () => {
   const {
     tasks,
@@ -122,6 +128,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
 ⚠️ Balas OK untuk bisa akses link`);
   const [newPromoImageUrl, setNewPromoImageUrl] = useState('');
   const [newPromoImageFile, setNewPromoImageFile] = useState<File | null>(null);
+  const [isCreatingTasks, setIsCreatingTasks] = useState(false);
   const [rawNumbersInput, setRawNumbersInput] = useState(
     `082234594977
 081253203314
@@ -174,29 +181,63 @@ didaftarin> https://cutt.ly/WhatsapLENA
 
   const handleCreateTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed = rawNumbersInput
-      .split('\n')
-      .map((n) => n.trim())
-      .filter((n) => n.length > 5);
+    const parsed = parsePhoneNumbers(rawNumbersInput);
 
     if (parsed.length === 0) {
       showToast('Masukkan minimal 1 nomor telepon!');
       return;
     }
 
-    const created = await adminCreateTask({
-      code: newTaskCode,
-      store: newTaskStore,
-      batch: newTaskBatch,
-      content: newTaskContent,
-      promoImageUrl: newPromoImageUrl,
-      numbers: parsed,
-    });
+    const numberGroups: string[][] = [];
+    for (let index = 0; index < parsed.length; index += 20) {
+      numberGroups.push(parsed.slice(index, index + 20));
+    }
 
-    if (created) {
-      if (newPromoImageFile) await uploadPromoImage(created.id, newPromoImageFile);
-      handleSelectEditTask(created.id);
-      setActiveTab('edit_task');
+    setIsCreatingTasks(true);
+    const createdTasks: Task[] = [];
+    try {
+      for (let index = 0; index < numberGroups.length; index++) {
+        const created = await adminCreateTask({
+          code: numberGroups.length === 1 ? newTaskCode : `${newTaskCode} (${index + 1}/${numberGroups.length})`,
+          store: newTaskStore,
+          batch: newTaskBatch,
+          content: newTaskContent,
+          promoImageUrl: newPromoImageUrl,
+          numbers: numberGroups[index],
+        });
+
+        if (!created) {
+          showToast(`Proses berhenti. ${createdTasks.length} dari ${numberGroups.length} task berhasil dibuat.`);
+          break;
+        }
+        createdTasks.push(created);
+        if (newPromoImageFile) await uploadPromoImage(created.id, newPromoImageFile);
+      }
+
+      if (createdTasks.length > 0) {
+        handleSelectEditTask(createdTasks[0].id);
+        setActiveTab('edit_task');
+        if (createdTasks.length === numberGroups.length && numberGroups.length > 1) {
+          showToast(`${createdTasks.length} task berhasil dibuat, masing-masing maksimal 20 nomor.`);
+        }
+      }
+    } finally {
+      setIsCreatingTasks(false);
+    }
+  };
+
+  const handleNumbersFileImport = async (file?: File) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.txt') && file.type !== 'text/plain') {
+      showToast('Pilih file teks .txt');
+      return;
+    }
+    try {
+      const contents = await file.text();
+      setRawNumbersInput(contents.replace(/^\uFEFF/, ''));
+      showToast(`${parsePhoneNumbers(contents).length} nomor berhasil diimpor dari file.`);
+    } catch {
+      showToast('File tidak dapat dibaca');
     }
   };
 
@@ -746,7 +787,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                       Daftar Nomor Tujuan (Tempel 1 nomor per baris)
                     </label>
                     <span className="text-[11px] font-bold text-teal-700">
-                      {rawNumbersInput.split('\n').filter((n) => n.trim().length > 5).length} nomor terdeteksi
+                      {parsePhoneNumbers(rawNumbersInput).length} nomor · {Math.ceil(parsePhoneNumbers(rawNumbersInput).length / 20)} task
                     </span>
                   </div>
                   <textarea
@@ -757,18 +798,31 @@ didaftarin> https://cutt.ly/WhatsapLENA
                     required
                     className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-600 leading-relaxed"
                   />
+                  <label className="block text-[11px] text-gray-600">
+                    Atau impor daftar nomor dari file .txt
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      onChange={(e) => {
+                        void handleNumbersFileImport(e.target.files?.[0]);
+                        e.currentTarget.value = '';
+                      }}
+                      className="block w-full mt-1 text-xs text-gray-500 file:mr-2 file:px-2.5 file:py-1 file:rounded-md file:border-0 file:bg-teal-50 file:text-teal-800 file:font-medium"
+                    />
+                  </label>
                   <p className="text-[11px] text-gray-400">
-                    Nomor internasional diterima. Nomor lokal Indonesia berawalan 08 otomatis diubah menjadi 628; kode negara lain, misalnya 852, tetap dipertahankan.
+                    Nomor akan dibagi otomatis menjadi beberapa task, maksimal 20 nomor per task. Nomor internasional diterima; nomor lokal Indonesia berawalan 08 otomatis diubah menjadi 628.
                   </p>
                 </div>
 
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full sm:w-auto px-6 py-2.5 bg-[#127369] hover:bg-[#0f6057] text-white rounded-lg text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
+                    disabled={isCreatingTasks}
+                    className="w-full sm:w-auto px-6 py-2.5 bg-[#127369] hover:bg-[#0f6057] disabled:opacity-60 disabled:cursor-wait text-white rounded-lg text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
                   >
                     <PlusCircle className="w-4 h-4" />
-                    <span>Simpan & Terbitkan</span>
+                    <span>{isCreatingTasks ? 'Membuat task…' : 'Simpan & Terbitkan'}</span>
                   </button>
                 </div>
               </form>
