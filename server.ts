@@ -380,6 +380,7 @@ app.get('/api/operators', async (_req, res) => {
         totalCompletedNumbers: operator.total_completed_numbers || 0,
         totalFailedNumbers: operator.total_failed_numbers || 0,
         isActive: Boolean(operator.is_active),
+        hasPin: Boolean(operator.pin),
       }))
     );
   } catch (err: any) {
@@ -390,9 +391,12 @@ app.get('/api/operators', async (_req, res) => {
 // 2. Create operator
 app.post('/api/operators', async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, pin } = req.body;
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'Nama pengerja wajib diisi' });
+    }
+    if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
+      return res.status(400).json({ error: 'PIN harus terdiri dari 6 angka' });
     }
     const cleanName = name.trim();
     if (cleanName.length < 2 || cleanName.length > 32) {
@@ -410,7 +414,7 @@ app.post('/api/operators', async (req, res) => {
     await execute(
       `INSERT INTO operators (id, name, pin, created_at, total_completed_tasks, total_completed_numbers, total_failed_numbers, is_active)
        VALUES (?, ?, ?, ?, 0, 0, 0, 1)`,
-      [id, cleanName, '', createdAt]
+      [id, cleanName, pin, createdAt]
     );
 
     const created = await queryOne('SELECT * FROM operators WHERE id = ?', [id]);
@@ -422,7 +426,33 @@ app.post('/api/operators', async (req, res) => {
       total_completed_numbers: created.total_completed_numbers || 0,
       total_failed_numbers: created.total_failed_numbers || 0,
       is_active: created.is_active,
+      hasPin: Boolean(created.pin),
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify an operator PIN without exposing it to the client.
+app.post('/api/operators/verify-pin', async (req, res) => {
+  try {
+    const { operatorId, pin } = req.body;
+    if (!operatorId || typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
+      return res.status(400).json({ error: 'Masukkan PIN yang terdiri dari 6 angka' });
+    }
+
+    const operator = await queryOne(
+      'SELECT id, pin, is_active FROM operators WHERE id = ?',
+      [operatorId]
+    );
+    if (!operator || !operator.is_active) {
+      return res.status(404).json({ error: 'Nama pengerja tidak ditemukan atau tidak aktif' });
+    }
+    if (!operator.pin || operator.pin !== pin) {
+      return res.status(401).json({ error: 'PIN tidak sesuai. Hubungi admin jika PIN belum disetel.' });
+    }
+
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -432,8 +462,12 @@ app.post('/api/operators', async (req, res) => {
 app.post('/api/operators/reset-pin', async (req, res) => {
   try {
     const { operatorId, newPin } = req.body;
-    if (!operatorId || !newPin || newPin.length !== 6) {
-      return res.status(400).json({ error: 'Operator ID and 6-digit PIN are required' });
+    if (!operatorId || typeof newPin !== 'string' || !/^\d{6}$/.test(newPin)) {
+      return res.status(400).json({ error: 'ID pengerja dan PIN 6 angka wajib diisi' });
+    }
+    const operator = await queryOne('SELECT id FROM operators WHERE id = ?', [operatorId]);
+    if (!operator) {
+      return res.status(404).json({ error: 'Pengerja tidak ditemukan' });
     }
     await execute('UPDATE operators SET pin = ? WHERE id = ?', [newPin, operatorId]);
     res.json({ success: true, message: 'PIN berhasil diubah' });

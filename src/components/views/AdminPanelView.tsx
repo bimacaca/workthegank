@@ -45,6 +45,8 @@ export const AdminPanelView: React.FC = () => {
   const [newAdminRole, setNewAdminRole] = useState('admin');
   const [changePassAdminId, setChangePassAdminId] = useState<string | null>(null);
   const [changePassValue, setChangePassValue] = useState('');
+  const [pinOperatorId, setPinOperatorId] = useState<string | null>(null);
+  const [operatorPinValue, setOperatorPinValue] = useState('');
 
   // Review states
   const pendingTasks = tasks.filter((t) => t.status === 'submitted');
@@ -74,6 +76,28 @@ export const AdminPanelView: React.FC = () => {
       showToast(error.message || 'Pengecekan nomor gagal');
     } finally {
       setIsCheckingNumbers(false);
+    }
+  };
+
+  const handleOperatorPinSave = async (operatorId: string) => {
+    if (!/^\d{6}$/.test(operatorPinValue)) {
+      showToast('PIN harus terdiri dari 6 angka');
+      return;
+    }
+    try {
+      const response = await fetch('/api/operators/reset-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operatorId, newPin: operatorPinValue }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Gagal menyimpan PIN');
+      setPinOperatorId(null);
+      setOperatorPinValue('');
+      await refreshData();
+      showToast('PIN pengerja berhasil disimpan');
+    } catch (error: any) {
+      showToast(error.message || 'Gagal menyimpan PIN');
     }
   };
 
@@ -968,7 +992,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                     Daftar Pengerja
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Nama pengerja digunakan sebagai identitas sesi dan pencatatan performa.
+                    Atur PIN 6 angka agar pengerja dapat memilih nama dan memulai sesi.
                   </p>
                 </div>
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 self-start sm:self-auto">
@@ -977,12 +1001,13 @@ didaftarin> https://cutt.ly/WhatsapLENA
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs sm:text-sm min-w-[400px]">
+                <table className="w-full text-left text-xs sm:text-sm min-w-[520px]">
                   <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-[11px] uppercase tracking-wider font-semibold">
                     <tr>
                       <th className="px-4 sm:px-6 py-3.5">NAMA PENGERJA</th>
                       <th className="px-4 sm:px-6 py-3.5 text-center">TASK</th>
                       <th className="px-4 sm:px-6 py-3.5 text-center">NOMOR</th>
+                      <th className="px-4 sm:px-6 py-3.5 text-center">PIN</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -998,11 +1023,44 @@ didaftarin> https://cutt.ly/WhatsapLENA
                           <td className="px-4 sm:px-6 py-4 text-center font-mono text-gray-900 font-semibold">
                             {op.total_completed_numbers ?? op.totalCompletedNumbers ?? 0}
                           </td>
+                          <td className="px-4 sm:px-6 py-3 text-center">
+                            {pinOperatorId === op.id ? (
+                              <div className="flex items-center justify-center gap-2">
+                                <input
+                                  type="password"
+                                  value={operatorPinValue}
+                                  onChange={(e) => setOperatorPinValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                  placeholder="6 angka"
+                                  inputMode="numeric"
+                                  maxLength={6}
+                                  autoComplete="new-password"
+                                  aria-label={`PIN baru untuk ${op.name}`}
+                                  className="w-24 px-2 py-1.5 rounded border border-gray-200 text-xs"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleOperatorPinSave(op.id)}
+                                  className="text-teal-700 hover:underline font-semibold"
+                                >Simpan</button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setPinOperatorId(null); setOperatorPinValue(''); }}
+                                  className="text-gray-500 hover:underline"
+                                >Batal</button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => { setPinOperatorId(op.id); setOperatorPinValue(''); }}
+                                className="text-teal-700 hover:underline font-medium"
+                              >{op.hasPin ? 'Ganti PIN' : 'Atur PIN'}</button>
+                            )}
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={3} className="px-6 py-8 text-center text-gray-400 text-xs">
+                        <td colSpan={4} className="px-6 py-8 text-center text-gray-400 text-xs">
                           Belum ada pengerja yang mendaftar. Pengerja dapat mendaftar melalui halaman &apos;Nama Pengerja&apos;.
                         </td>
                       </tr>

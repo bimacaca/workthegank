@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
-import { Check } from 'lucide-react';
+import { Check, KeyRound } from 'lucide-react';
 
 export const OperatorSelectView: React.FC = () => {
   const {
@@ -16,8 +16,10 @@ export const OperatorSelectView: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedName, setSelectedName] = useState(activeOperator?.name || '');
+  const [pin, setPin] = useState('');
   const [showNewNameInput, setShowNewNameInput] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newPin, setNewPin] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredOperators = operators.filter((op) =>
@@ -34,7 +36,11 @@ export const OperatorSelectView: React.FC = () => {
           showToast('Nama harus antara 2 hingga 32 karakter');
           return;
         }
-        const created = await createOperator(newName.trim());
+        if (!/^\d{6}$/.test(newPin)) {
+          showToast('PIN harus terdiri dari 6 angka');
+          return;
+        }
+        const created = await createOperator(newName.trim(), newPin);
         if (created) {
           navigate('/work');
         }
@@ -46,7 +52,12 @@ export const OperatorSelectView: React.FC = () => {
         return;
       }
 
-      const success = await selectOperator(selectedName);
+      if (!/^\d{6}$/.test(pin)) {
+        showToast('Masukkan PIN 6 angka untuk nama yang dipilih');
+        return;
+      }
+
+      const success = await selectOperator(selectedName, pin);
       if (success) {
         navigate('/work');
       }
@@ -72,7 +83,7 @@ export const OperatorSelectView: React.FC = () => {
               Siapa yang mengerjakan?
             </h2>
             <p className="text-xs sm:text-sm text-gray-600 mb-2.5 leading-relaxed">
-              Satu akun ini dipakai bersama-sama. Isi nama Anda supaya hasil kerja tercatat atas nama sendiri dan muncul di papan peringkat.
+              Satu akun ini dipakai bersama-sama. Pilih nama dan masukkan PIN 6 angka agar hasil kerja tercatat atas nama Anda.
             </p>
             <p className="text-xs sm:text-sm text-gray-600 mb-6 leading-relaxed">
               Nama yang dipilih menjadi identitas sesi pengerjaan ini. Gunakan nama yang sama saat melanjutkan pekerjaan.
@@ -114,6 +125,29 @@ export const OperatorSelectView: React.FC = () => {
                 </select>
               </div>
 
+              {!showNewNameInput && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-800" htmlFor="operator-pin">
+                    PIN pengerja
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      id="operator-pin"
+                      type="password"
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="Masukkan PIN 6 angka"
+                      inputMode="numeric"
+                      maxLength={6}
+                      autoComplete="off"
+                      required
+                      className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-xs sm:text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Toggle Nama Baru */}
               <div className="pt-1">
                 <button
@@ -138,8 +172,23 @@ export const OperatorSelectView: React.FC = () => {
                     placeholder="Contoh: Rina"
                     className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-xs sm:text-sm bg-white"
                   />
+                  <label className="block text-xs sm:text-sm font-medium text-gray-800" htmlFor="new-operator-pin">
+                    Buat PIN 6 angka
+                  </label>
+                  <input
+                    id="new-operator-pin"
+                    type="password"
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Buat PIN 6 angka"
+                    inputMode="numeric"
+                    maxLength={6}
+                    autoComplete="new-password"
+                    required
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-xs sm:text-sm bg-white"
+                  />
                   <p className="text-[11px] text-gray-500 leading-relaxed pt-1">
-                    Isi hanya bila nama Anda memang belum terdaftar; cari dulu di atas supaya tidak tercatat ganda. 2–32 karakter: huruf, angka, spasi, titik, apostrof, strip.
+                    Isi hanya bila nama Anda belum terdaftar. Simpan PIN ini untuk digunakan setiap kali memilih nama tersebut.
                   </p>
                 </div>
               )}

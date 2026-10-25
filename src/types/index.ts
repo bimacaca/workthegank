@@ -68,7 +68,8 @@ export interface AdminAccount {
 export interface Operator {
   id: string;
   name: string;
-  pin?: string; // Legacy field; no longer used for worker sessions.
+  pin?: string;
+  hasPin?: boolean;
   createdAt: string;
   created_at?: string;
   totalCompletedTasks: number;

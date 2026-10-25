@@ -22,8 +22,8 @@ interface AppContextType {
   // Operator
   activeOperator: Operator | null;
   operators: Operator[];
-  selectOperator: (name: string) => Promise<boolean>;
-  createOperator: (name: string) => Promise<Operator | null>;
+  selectOperator: (name: string, pin: string) => Promise<boolean>;
+  createOperator: (name: string, pin: string) => Promise<Operator | null>;
   clearOperator: () => void;
 
   // Tasks
@@ -473,24 +473,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Operator actions
-  const selectOperator = async (name: string): Promise<boolean> => {
+  const selectOperator = async (name: string, pin: string): Promise<boolean> => {
     const found = operators.find((op) => op.name.toLowerCase() === name.trim().toLowerCase());
     if (!found) {
       showToast('Nama operator tidak ditemukan!');
       return false;
     }
+
+    try {
+      const res = await fetch('/api/operators/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operatorId: found.id, pin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'PIN tidak sesuai');
+        return false;
+      }
+    } catch {
+      showToast('Gagal memverifikasi PIN. Periksa koneksi server.');
+      return false;
+    }
+
     setActiveOperator(found);
     localStorage.setItem(STORAGE_KEYS.ACTIVE_OP, JSON.stringify(found));
     showToast(`Pengerja aktif: ${found.name}`);
     return true;
   };
 
-  const createOperator = async (name: string): Promise<Operator | null> => {
+  const createOperator = async (name: string, pin: string): Promise<Operator | null> => {
     try {
       const res = await fetch('/api/operators', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), pin }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -501,7 +518,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const newOp: Operator = {
         id: created.id,
         name: created.name,
-        pin: '',
+        hasPin: true,
         createdAt: created.created_at,
         totalCompletedTasks: created.total_completed_tasks || 0,
         totalCompletedNumbers: created.total_completed_numbers || 0,
