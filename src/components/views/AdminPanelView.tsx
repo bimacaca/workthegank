@@ -189,8 +189,18 @@ didaftarin> https://cutt.ly/WhatsapLENA
     }
 
     const numberGroups: string[][] = [];
-    for (let index = 0; index < parsed.length; index += 20) {
-      numberGroups.push(parsed.slice(index, index + 20));
+    const groupCount = Math.ceil(parsed.length / 20);
+    for (let index = 0; index < groupCount; index++) {
+      numberGroups.push([]);
+    }
+    const groupCapacities = numberGroups.map((_, index) => Math.min(20, parsed.length - index * 20));
+    let groupIndex = 0;
+    for (const number of parsed) {
+      while (numberGroups[groupIndex].length >= groupCapacities[groupIndex]) {
+        groupIndex = (groupIndex + 1) % groupCount;
+      }
+      numberGroups[groupIndex].push(number);
+      groupIndex = (groupIndex + 1) % groupCount;
     }
 
     setIsCreatingTasks(true);
@@ -271,6 +281,10 @@ didaftarin> https://cutt.ly/WhatsapLENA
 
   const handleAddNumberToEdit = () => {
     if (!newNumberToAdd.trim()) return;
+    if (editNumbers.length >= 20) {
+      showToast('Task sudah berisi 20 nomor. Tambahkan nomor ke task lain.');
+      return;
+    }
     const cleanedInput = newNumberToAdd.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
     let clean = cleanedInput.replace(/\D/g, '');
     if (!cleanedInput.startsWith('+') && clean.startsWith('08')) {
@@ -811,7 +825,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                     />
                   </label>
                   <p className="text-[11px] text-gray-400">
-                    Nomor akan dibagi otomatis menjadi beberapa task, maksimal 20 nomor per task. Nomor internasional diterima; nomor lokal Indonesia berawalan 08 otomatis diubah menjadi 628.
+                    Nomor dibagikan bergiliran antar-task, maksimal 20 nomor per task; sisa nomor masuk ke task terakhir. Nomor internasional diterima; nomor lokal Indonesia berawalan 08 otomatis diubah menjadi 628.
                   </p>
                 </div>
 
