@@ -15,6 +15,11 @@ import {
   Download,
 } from 'lucide-react';
 
+const formatPhoneForDisplay = (phoneNumber: string) => {
+  const digits = phoneNumber.replace(/\D/g, '');
+  return digits && !digits.startsWith('62') ? `+${digits}` : digits;
+};
+
 export const TaskDetailView: React.FC = () => {
   const {
     activeTask,
@@ -247,7 +252,7 @@ export const TaskDetailView: React.FC = () => {
                         <td className="px-3 sm:px-5 py-3">
                           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                             <a
-                              href={`https://wa.me/${item.phoneNumber}`}
+                              href={`https://wa.me/${item.phoneNumber.replace(/\D/g, '')}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-[#25D366] hover:opacity-80 transition-opacity p-0.5 inline-flex items-center"
@@ -257,12 +262,12 @@ export const TaskDetailView: React.FC = () => {
                             </a>
 
                             <a
-                              href={`https://wa.me/${item.phoneNumber}`}
+                              href={`https://wa.me/${item.phoneNumber.replace(/\D/g, '')}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="font-mono text-xs sm:text-sm text-teal-700 hover:underline hover:text-teal-900 font-medium"
                             >
-                              {item.phoneNumber}
+                              {formatPhoneForDisplay(item.phoneNumber)}
                             </a>
 
                             {isFailed && item.failedReason && (

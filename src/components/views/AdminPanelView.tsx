@@ -19,6 +19,11 @@ import {
 } from 'lucide-react';
 import { Task, NumberStatus } from '../../types';
 
+const formatPhoneForDisplay = (phoneNumber: string) => {
+  const digits = phoneNumber.replace(/\D/g, '');
+  return digits && !digits.startsWith('62') ? `+${digits}` : digits;
+};
+
 export const AdminPanelView: React.FC = () => {
   const {
     tasks,
@@ -920,7 +925,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                               <span className="text-gray-400 w-4 font-mono shrink-0">{idx + 1}.</span>
                               <input
                                 type="text"
-                                value={num.phoneNumber}
+                                value={formatPhoneForDisplay(num.phoneNumber)}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   setEditNumbers((prev) =>
