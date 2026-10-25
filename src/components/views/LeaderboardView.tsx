@@ -10,7 +10,8 @@ export const LeaderboardView: React.FC = () => {
   const [hoveredHour, setHoveredHour] = useState<number | null>(null);
 
   const rankedOperators = [...operators].sort((a, b) => {
-    return (b.totalCompletedNumbers || 0) - (a.totalCompletedNumbers || 0);
+    return (b.todayCompletedNumbers || 0) - (a.todayCompletedNumbers || 0)
+      || a.name.localeCompare(b.name);
   });
 
   // Set the graph scale from the largest stacked bar (completed + failed),
@@ -68,7 +69,7 @@ export const LeaderboardView: React.FC = () => {
           </div>
 
           <p className="text-xs text-gray-500">
-            Periode ditutup pukul 00.00 WIB. Pekerjaan setelah tengah malam masuk ke periode berikutnya.
+            Peringkat dan total dihitung untuk hari ini, lalu mulai dari nol otomatis setiap pukul 00.00 WIB.
           </p>
 
           {/* Daily Card Metrics */}
@@ -229,8 +230,10 @@ export const LeaderboardView: React.FC = () => {
                 <tbody className="divide-y divide-gray-100">
                   {rankedOperators.length > 0 ? (
                     rankedOperators.map((op, idx) => {
-                      const total = (op.totalCompletedNumbers || 0) + (op.totalFailedNumbers || 0);
-                      const successRate = total > 0 ? (((op.totalCompletedNumbers || 0) / total) * 100).toFixed(1) : '100.0';
+                      const todayCompleted = op.todayCompletedNumbers || 0;
+                      const todayFailed = op.todayFailedNumbers || 0;
+                      const total = todayCompleted + todayFailed;
+                      const successRate = total > 0 ? ((todayCompleted / total) * 100).toFixed(1) : '100.0';
 
                       return (
                         <tr key={op.id} className="hover:bg-gray-50/60 transition-colors">
@@ -255,11 +258,11 @@ export const LeaderboardView: React.FC = () => {
                           </td>
 
                           <td className="px-4 sm:px-5 py-3.5 text-center font-mono text-gray-700">
-                            {op.totalCompletedTasks || 0}
+                            {op.todayCompletedTasks || 0}
                           </td>
 
                           <td className="px-4 sm:px-5 py-3.5 text-center font-mono text-teal-800 font-bold">
-                            {op.totalCompletedNumbers || 0}
+                            {todayCompleted}
                           </td>
 
                           <td className="px-4 sm:px-5 py-3.5 text-right font-medium text-emerald-700">

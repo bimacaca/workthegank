@@ -13,6 +13,7 @@ import { isValidPhoneNumber, normalizePhone, phoneAppearsInOcr } from './server/
 
 const app = express();
 const PORT = 3005;
+const JAKARTA_TIMEZONE = 'Asia/Jakarta';
 const OCR_MAX_FRAMES_PER_VIDEO = 120;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
@@ -26,6 +27,17 @@ const numberCheckJobs = new Map<string, {
   error?: string;
   updatedAt: number;
 }>();
+
+function getJakartaDate(): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: JAKARTA_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
@@ -438,7 +450,21 @@ app.get('/api/operators', async (_req, res) => {
         COALESCE(SUM(CASE
           WHEN t.status IN ('submitted', 'approved', 'rejected') AND n.status = 'failed' THEN 1
           ELSE 0
-        END), 0) AS total_failed_numbers
+        END), 0) AS total_failed_numbers,
+        COUNT(DISTINCT CASE
+          WHEN t.submitted_at IS NOT NULL
+            AND date(t.submitted_at, '+7 hours') = date('now', '+7 hours') THEN t.id
+        END) AS today_completed_tasks,
+        COALESCE(SUM(CASE
+          WHEN n.status = 'done' AND n.updated_at IS NOT NULL
+            AND date(n.updated_at, '+7 hours') = date('now', '+7 hours') THEN 1
+          ELSE 0
+        END), 0) AS today_completed_numbers,
+        COALESCE(SUM(CASE
+          WHEN n.status = 'failed' AND n.updated_at IS NOT NULL
+            AND date(n.updated_at, '+7 hours') = date('now', '+7 hours') THEN 1
+          ELSE 0
+        END), 0) AS today_failed_numbers
       FROM operators o
       LEFT JOIN tasks t ON LOWER(t.operator_name) = LOWER(o.name)
       LEFT JOIN task_numbers n ON n.task_id = t.id
@@ -453,6 +479,9 @@ app.get('/api/operators', async (_req, res) => {
         totalCompletedTasks: operator.total_completed_tasks || 0,
         totalCompletedNumbers: operator.total_completed_numbers || 0,
         totalFailedNumbers: operator.total_failed_numbers || 0,
+        todayCompletedTasks: operator.today_completed_tasks || 0,
+        todayCompletedNumbers: operator.today_completed_numbers || 0,
+        todayFailedNumbers: operator.today_failed_numbers || 0,
         isActive: Boolean(operator.is_active),
         hasPin: Boolean(operator.pin),
       }))
@@ -1081,13 +1110,20 @@ app.post('/api/tasks/:id/toggle-payment', async (req, res) => {
 app.get('/api/stats', async (_req, res) => {
   try {
     const totalDoneRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers WHERE status = 'done'"
+      `SELECT COUNT(*) as c FROM task_numbers
+       WHERE status = 'done' AND updated_at IS NOT NULL
+         AND date(updated_at, '+7 hours') = date('now', '+7 hours')`
     );
     const totalFailedRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers WHERE status = 'failed'"
+      `SELECT COUNT(*) as c FROM task_numbers
+       WHERE status = 'failed' AND updated_at IS NOT NULL
+         AND date(updated_at, '+7 hours') = date('now', '+7 hours')`
     );
     const submittedTasksRow = await queryOne(
-      "SELECT COUNT(*) as c FROM tasks WHERE status IN ('submitted', 'approved', 'rejected')"
+      `SELECT COUNT(*) as c FROM tasks
+       WHERE status IN ('submitted', 'approved', 'rejected')
+         AND submitted_at IS NOT NULL
+         AND date(submitted_at, '+7 hours') = date('now', '+7 hours')`
     );
     const activeWorkersRow = await queryOne(
       'SELECT COUNT(*) as c FROM operators WHERE is_active = 1'
@@ -1100,11 +1136,11 @@ app.get('/api/stats', async (_req, res) => {
     );
     const hourlyRows = await queryAll(
       `SELECT
-         CAST(strftime('%H', updated_at) AS INTEGER) AS hour,
+         CAST(strftime('%H', updated_at, '+7 hours') AS INTEGER) AS hour,
          SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
        FROM task_numbers
-       WHERE updated_at IS NOT NULL AND date(updated_at) = date('now')
+       WHERE updated_at IS NOT NULL AND date(updated_at, '+7 hours') = date('now', '+7 hours')
        GROUP BY hour`
     );
     const hourlyCompleted = Array(24).fill(0);
@@ -1125,7 +1161,7 @@ app.get('/api/stats', async (_req, res) => {
       inProgressTasks: inProgressTasksRow?.c || 0,
       hourlyCompleted,
       hourlyFailed,
-      date: new Date().toISOString().slice(0, 10),
+      date: getJakartaDate(),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

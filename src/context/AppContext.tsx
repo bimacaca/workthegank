@@ -98,6 +98,9 @@ const STORAGE_KEYS = {
   ADMIN: 'wtg_admin_user_v2',
 };
 
+const getJakartaDate = (date = new Date()) =>
+  new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(date);
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Path routing (Real route navigation instead of pure CSR state)
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -211,7 +214,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (statsRes && statsRes.ok) {
         const statsData = await statsRes.json();
         setDailyStat({
-          date: statsData.date || new Date().toISOString().slice(0, 10),
+          date: statsData.date || getJakartaDate(),
           completedNumbers: statsData.completedNumbers || 0,
           submittedTasks: statsData.submittedTasks || 0,
           activeWorkers: statsData.activeWorkers || 0,
@@ -231,6 +234,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Initial load
   useEffect(() => {
     refreshData();
+  }, [refreshData]);
+
+  useEffect(() => {
+    let midnightTimeout: number;
+    const scheduleMidnightRefresh = () => {
+      const now = new Date();
+      const dateParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+      }).formatToParts(now);
+      const parts = Object.fromEntries(dateParts.map(({ type, value }) => [type, Number(value)]));
+      const nextJakartaMidnight = Date.UTC(parts.year, parts.month - 1, parts.day + 1) - 7 * 60 * 60 * 1000;
+      const delay = Math.max(1000, nextJakartaMidnight - now.getTime());
+
+      midnightTimeout = window.setTimeout(() => {
+        void refreshData().finally(scheduleMidnightRefresh);
+      }, delay);
+    };
+
+    scheduleMidnightRefresh();
+    return () => window.clearTimeout(midnightTimeout);
   }, [refreshData]);
 
   // Fetch admin accounts list

@@ -74,10 +74,13 @@ export interface Operator {
   created_at?: string;
   totalCompletedTasks: number;
   total_completed_tasks?: number;
+  todayCompletedTasks?: number;
   totalCompletedNumbers: number;
   total_completed_numbers?: number;
+  todayCompletedNumbers?: number;
   totalFailedNumbers: number;
   total_failed_numbers?: number;
+  todayFailedNumbers?: number;
   isActive: boolean;
   is_active?: number | boolean;
 }
