@@ -32,6 +32,8 @@ export async function startBaileys(phone?: string): Promise<void> {
       if (next === 'close') {
         socket = null;
         const code = (lastDisconnect?.error as any)?.output?.statusCode;
+        const reason = (lastDisconnect?.error as any)?.message || 'koneksi ditutup oleh WhatsApp';
+        lastError = `Baileys connection closed${code ? ` (${code})` : ''}: ${reason}`;
         if (code !== DisconnectReason.loggedOut) {
           connecting = null;
           void startBaileys();
@@ -48,6 +50,7 @@ export async function startBaileys(phone?: string): Promise<void> {
 
 export async function requestPairing(phone: string) {
   await startBaileys(phone);
+  if (!pairingCode) throw new Error(lastError || 'Pairing code belum diterima dari WhatsApp');
   return pairingCode;
 }
 
@@ -58,6 +61,7 @@ export async function requestQr() {
   for (let attempt = 0; attempt < 20 && !qrCode; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  if (!qrCode) throw new Error(lastError || 'QR belum diterima dari WhatsApp');
   return qrCode;
 }
 

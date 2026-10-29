@@ -82,13 +82,14 @@ export const AdminPanelView: React.FC = () => {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
 
   const requestWhatsAppPairing = async () => {
     try {
       const response = await fetch('/api/whatsapp/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: pairingPhone }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Pairing gagal');
-      setPairingCode(data.pairingCode || null); setWhatsappStatus(data.connection || 'connecting');
+      setPairingCode(data.pairingCode || null); setWhatsappStatus(data.connection || 'connecting'); setWhatsappError(data.error || null);
       showToast('Kode pairing berhasil dibuat. Masukkan di WhatsApp Perangkat Tertaut.');
     } catch (error: any) { showToast(error.message || 'Pairing WhatsApp gagal'); }
   };
@@ -98,7 +99,7 @@ export const AdminPanelView: React.FC = () => {
       const response = await fetch('/api/whatsapp/qr', { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'QR gagal dibuat');
-      setWhatsappQr(data.qrCode || null); setWhatsappStatus(data.connection || 'connecting');
+      setWhatsappQr(data.qrCode || null); setWhatsappStatus(data.connection || 'connecting'); setWhatsappError(data.error || null);
       showToast('QR siap dipindai dari WhatsApp Perangkat Tertaut.');
     } catch (error: any) { showToast(error.message || 'QR WhatsApp gagal dibuat'); }
   };
@@ -106,7 +107,7 @@ export const AdminPanelView: React.FC = () => {
   useEffect(() => {
     const timer = window.setInterval(async () => {
       const response = await fetch('/api/whatsapp/status').catch(() => null);
-      if (response?.ok) { const data = await response.json(); setWhatsappStatus(data.connection || 'disconnected'); if (data.pairingCode) setPairingCode(data.pairingCode); if (data.qrCode) setWhatsappQr(data.qrCode); if (data.connection === 'open') { setWhatsappQr(null); setPairingCode(null); } }
+      if (response?.ok) { const data = await response.json(); setWhatsappStatus(data.connection || 'disconnected'); setWhatsappError(data.error || null); if (data.pairingCode) setPairingCode(data.pairingCode); if (data.qrCode) setWhatsappQr(data.qrCode); if (data.connection === 'open') { setWhatsappQr(null); setPairingCode(null); setWhatsappError(null); } }
     }, 3000);
     return () => window.clearInterval(timer);
   }, []);
@@ -548,7 +549,8 @@ didaftarin> https://cutt.ly/WhatsapLENA
           </div>
 
           {activeTab === 'whatsapp' && <div className="bg-white border border-green-200 rounded-xl p-4 sm:p-6 space-y-4 max-w-2xl">
-            <div><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div></div>
+            <div><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div><div className="text-[11px] text-rose-700 mt-1">Jika status connection closed, server tidak dapat terhubung ke WhatsApp.</div></div>
+            {whatsappError && <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2 break-words">{whatsappError}</div>}
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-900 space-y-1">
               <p className="font-bold">Hubungkan perangkat WhatsApp</p>
               <p>Gunakan QR untuk scan dari WhatsApp → Perangkat tertaut, atau masukkan nomor lalu gunakan pairing code.</p>
