@@ -14,6 +14,16 @@ export const LeaderboardView: React.FC = () => {
   const rankedOperators = [...operators].sort((a, b) => {
     return (b.totalCompletedNumbers || 0) - (a.totalCompletedNumbers || 0);
   });
+  // Keep the headline total consistent with the ranking table. Rejected tasks
+  // are already excluded by the server's operator totals.
+  const totalCompletedNumbers = operators.reduce(
+    (sum, operator) => sum + Number(operator.totalCompletedNumbers || operator.total_completed_numbers || 0),
+    0
+  );
+  const totalFailedNumbers = operators.reduce(
+    (sum, operator) => sum + Number(operator.totalFailedNumbers || operator.total_failed_numbers || 0),
+    0
+  );
 
   // Set the graph scale from the largest stacked bar (completed + failed),
   // rounded up to an easy-to-read value rather than a fixed 2,000.
@@ -101,7 +111,7 @@ export const LeaderboardView: React.FC = () => {
                   Nomor selesai
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-gray-900">
-                  {dailyStat.completedNumbers.toLocaleString()}
+                  {totalCompletedNumbers.toLocaleString()}
                 </div>
               </div>
 
@@ -128,7 +138,7 @@ export const LeaderboardView: React.FC = () => {
                   Gagal (tidak dihitung)
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-gray-900">
-                  {dailyStat.failedNumbers}
+                  {totalFailedNumbers.toLocaleString()}
                 </div>
               </div>
             </div>
