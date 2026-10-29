@@ -9,7 +9,7 @@ import { createWorker } from 'tesseract.js';
 import ffmpegPath from 'ffmpeg-static';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
-import { baileysStatus, checkProfilePhoto, requestPairing, startBaileys } from './server/baileys.js';
+import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaileys } from './server/baileys.js';
 
 const app = express();
 const PORT = 3005;
@@ -56,6 +56,10 @@ const upload = multer({
 
 // WhatsApp/Baileys pairing and profile-photo checking
 app.get('/api/whatsapp/status', (_req, res) => res.json(baileysStatus()));
+app.post('/api/whatsapp/qr', async (_req, res) => {
+  try { res.json({ ...baileysStatus(), qrCode: await requestQr() }); }
+  catch (err: any) { res.status(400).json({ error: err.message }); }
+});
 app.post('/api/whatsapp/pair', async (req, res) => {
   try {
     const code = await requestPairing(String(req.body?.phone || ''));

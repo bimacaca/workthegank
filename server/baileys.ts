@@ -1,12 +1,14 @@
 import makeWASocket, { Browsers, DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
 import path from 'path';
 import fs from 'fs';
+import QRCode from 'qrcode';
 
 const AUTH_DIR = path.resolve(process.cwd(), 'data', 'baileys-auth');
 let socket: WASocket | null = null;
 let connection = 'disconnected';
 let pairingCode: string | null = null;
 let lastError: string | null = null;
+let qrCode: string | null = null;
 let connecting: Promise<void> | null = null;
 
 const jidFromPhone = (value: string) => {
@@ -22,8 +24,9 @@ export async function startBaileys(phone?: string): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     socket = makeWASocket({ auth: state, browser: Browsers.ubuntu('Chrome'), printQRInTerminal: false });
     socket.ev.on('creds.update', saveCreds);
-    socket.ev.on('connection.update', async ({ connection: next, lastDisconnect }) => {
+    socket.ev.on('connection.update', async ({ connection: next, lastDisconnect, qr }) => {
       if (next) connection = next;
+      if (qr) qrCode = await QRCode.toDataURL(qr);
       if (next === 'open') { pairingCode = null; lastError = null; }
       if (next === 'close') {
         socket = null;
@@ -47,7 +50,12 @@ export async function requestPairing(phone: string) {
   return pairingCode;
 }
 
-export const baileysStatus = () => ({ connection, paired: Boolean(socket?.user), user: socket?.user || null, pairingCode, error: lastError });
+export const baileysStatus = () => ({ connection, paired: Boolean(socket?.user), user: socket?.user || null, pairingCode, qrCode, error: lastError });
+
+export async function requestQr() {
+  await startBaileys();
+  return qrCode;
+}
 
 export async function checkProfilePhoto(phone: string) {
   if (!socket || connection !== 'open') throw new Error('WhatsApp belum terhubung. Minta pairing terlebih dahulu.');
