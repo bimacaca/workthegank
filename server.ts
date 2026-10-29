@@ -1067,7 +1067,7 @@ app.get('/api/stats', async (req, res) => {
        FROM task_numbers
        JOIN tasks t ON t.id = task_numbers.task_id
        WHERE updated_at IS NOT NULL AND t.status IN ('submitted', 'approved') AND date(COALESCE(t.completed_at, updated_at)) = ?
-       GROUP BY hour`
+       GROUP BY hour`, [requestedDate]
     );
     const hourlyCompleted = Array(24).fill(0);
     const hourlyFailed = Array(24).fill(0);
@@ -1076,7 +1076,7 @@ app.get('/api/stats', async (req, res) => {
         hourlyCompleted[row.hour] = row.completed || 0;
         hourlyFailed[row.hour] = row.failed || 0;
       }
-      }, [requestedDate]);
+      });
 
     res.json({
       completedNumbers: totalDoneRow?.c || 0,
