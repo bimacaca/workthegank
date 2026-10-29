@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Sparkles,
   LogOut,
+  Smartphone,
 } from 'lucide-react';
 import { Task, NumberStatus } from '../../types';
 
@@ -49,7 +50,7 @@ export const AdminPanelView: React.FC = () => {
     refreshData,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users'>('review');
+  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp'>('review');
 
   // Admin user management states
   const [newAdminUser, setNewAdminUser] = useState('');
@@ -533,11 +534,25 @@ didaftarin> https://cutt.ly/WhatsapLENA
                 <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
                 <span>Akun Admin ({adminAccounts.length})</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('whatsapp')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                  activeTab === 'whatsapp' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5 text-green-600" />
+                <span>WhatsApp</span>
+              </button>
             </div>
           </div>
 
-          <div className="bg-white border border-green-200 rounded-xl p-3 sm:p-4 space-y-3">
+          {activeTab === 'whatsapp' && <div className="bg-white border border-green-200 rounded-xl p-4 sm:p-6 space-y-4 max-w-2xl">
             <div><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div></div>
+            <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-900 space-y-1">
+              <p className="font-bold">Hubungkan perangkat WhatsApp</p>
+              <p>Gunakan QR untuk scan dari WhatsApp → Perangkat tertaut, atau masukkan nomor lalu gunakan pairing code.</p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-48" />
               <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold cursor-pointer">Buat Pairing Code</button>
@@ -545,7 +560,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
             </div>
             {pairingCode && <div className="inline-block font-mono font-bold tracking-widest text-green-800 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-sm">Kode: {pairingCode}</div>}
             {whatsappQr && <div><p className="text-[11px] text-gray-500 mb-1">Scan QR ini dari WhatsApp → Perangkat tertaut</p><img src={whatsappQr} alt="QR WhatsApp Baileys" className="w-40 h-40 rounded-lg border border-gray-200 bg-white p-1" /></div>}
-          </div>
+          </div>}
 
           {/* TAB 1: TINJAU VIDEO BUKTI */}
           {activeTab === 'review' && (
