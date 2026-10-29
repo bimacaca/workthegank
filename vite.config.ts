@@ -12,6 +12,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Permit the production/proxy hostname used to access the dev server.
+      allowedHosts: ['blast.hajiembed.web.id'],
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR === 'false',
       watch: process.env.DISABLE_HMR === 'false' ? {} : null,
