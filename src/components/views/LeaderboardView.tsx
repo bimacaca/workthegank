@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
 import { Calendar, ChevronRight, Trophy } from 'lucide-react';
 
 export const LeaderboardView: React.FC = () => {
-  const { dailyStat, operators } = useApp();
+  const { dailyStat, operators, refreshData } = useApp();
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [activeTab, setActiveTab] = useState<'Harian' | 'Mingguan' | 'Bulanan' | 'Rentang tanggal'>('Harian');
   const [hoveredHour, setHoveredHour] = useState<number | null>(null);
+  useEffect(() => { void refreshData(selectedDate); }, [selectedDate, refreshData]);
 
   const rankedOperators = [...operators].sort((a, b) => {
     return (b.totalCompletedNumbers || 0) - (a.totalCompletedNumbers || 0);
@@ -85,7 +87,7 @@ export const LeaderboardView: React.FC = () => {
                   <span>Pilih tanggal</span>
                 </button>
 
-                <button className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
+                <button onClick={() => { const d = new Date(`${selectedDate}T12:00:00`); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().slice(0, 10)); }} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
                   <span>Sebelumnya</span>
                   <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
                 </button>

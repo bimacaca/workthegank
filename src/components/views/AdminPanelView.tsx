@@ -37,6 +37,7 @@ export const AdminPanelView: React.FC = () => {
     adminCreateTask,
     adminUpdateTask,
     adminDeleteTask,
+    adminDeleteTasks,
     adminReviewTask,
     adminAccounts,
     createAdminAccount,
@@ -183,6 +184,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
   const [selectedEditTaskId, setSelectedEditTaskId] = useState<string>(
     tasks[0]?.id || ''
   );
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const taskToEdit = tasks.find((t) => t.id === selectedEditTaskId);
   const [editCode, setEditCode] = useState(taskToEdit?.code || '');
   const [editStore, setEditStore] = useState(taskToEdit?.store || '');
@@ -204,6 +206,16 @@ didaftarin> https://cutt.ly/WhatsapLENA
       setEditPromoImageUrl(t.promoImageUrl || t.promo_image_url || '');
       setEditNumbers([...(t.numbers || [])]);
     }
+  };
+
+  const toggleTaskSelection = (id: string) => setSelectedTaskIds((ids) =>
+    ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]
+  );
+
+  const handleBulkDelete = async () => {
+    if (!selectedTaskIds.length) return showToast('Pilih task yang ingin dihapus');
+    if (!window.confirm(`Hapus ${selectedTaskIds.length} task terpilih? Data tidak dapat dikembalikan.`)) return;
+    if (await adminDeleteTasks(selectedTaskIds)) setSelectedTaskIds([]);
   };
 
   const handleCreateTaskSubmit = async (e: React.FormEvent) => {
@@ -874,9 +886,13 @@ didaftarin> https://cutt.ly/WhatsapLENA
           {activeTab === 'edit_task' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 space-y-3">
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Pilih Task untuk Diedit ({tasks.length})
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Pilih Task untuk Diedit ({tasks.length})</h3>
+                  <button type="button" onClick={() => void handleBulkDelete()} disabled={!selectedTaskIds.length}
+                    className="px-2.5 py-1.5 rounded-md bg-rose-600 text-white text-[11px] font-semibold disabled:opacity-40 flex items-center gap-1">
+                    <Trash2 className="w-3 h-3" /> Hapus {selectedTaskIds.length || ''}
+                  </button>
+                </div>
 
                 <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                   {tasks.length > 0 ? (
@@ -892,6 +908,8 @@ didaftarin> https://cutt.ly/WhatsapLENA
                               : 'bg-white border-gray-200 hover:border-gray-300'
                           }`}
                         >
+                          <input type="checkbox" checked={selectedTaskIds.includes(t.id)} onChange={() => toggleTaskSelection(t.id)}
+                            onClick={(e) => e.stopPropagation()} className="float-right mt-0.5 accent-rose-600" aria-label={`Pilih task ${t.code}`} />
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-gray-900 truncate">
                               {t.code}

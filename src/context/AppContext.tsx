@@ -63,6 +63,7 @@ interface AppContextType {
     }
   ) => Promise<void>;
   adminDeleteTask: (taskId: string) => Promise<void>;
+  adminDeleteTasks: (taskIds: string[]) => Promise<boolean>;
   adminReviewTask: (
     taskId: string,
     verdict: 'approved' | 'rejected',
@@ -86,7 +87,7 @@ interface AppContextType {
   isLoading: boolean;
   toastMessage: string | null;
   showToast: (msg: string) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (date?: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -176,13 +177,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Fetch current data from the service API
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (date?: string) => {
     try {
       setIsLoading(true);
       const [tasksRes, opsRes, statsRes, adminRes] = await Promise.all([
         fetch('/api/tasks').catch(() => null),
         fetch('/api/operators').catch(() => null),
-        fetch('/api/stats').catch(() => null),
+        fetch(`/api/stats${date ? `?date=${encodeURIComponent(date)}` : ''}`).catch(() => null),
         fetch('/api/admin/list').catch(() => null),
       ]);
 
@@ -755,6 +756,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const adminDeleteTasks = async (taskIds: string[]): Promise<boolean> => {
+    if (!taskIds.length) return false;
+    try {
+      const res = await fetch('/api/tasks/bulk-delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: taskIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(data.error || 'Gagal menghapus task'); return false; }
+      await refreshData();
+      showToast(`${data.deleted || taskIds.length} task berhasil dihapus`);
+      return true;
+    } catch { showToast('Gagal menghapus task'); return false; }
+  };
+
   // Admin: Review task (Diterima / Dibatalkan)
   const adminReviewTask = async (
     taskId: string,
@@ -834,6 +850,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminCreateTask,
         adminUpdateTask,
         adminDeleteTask,
+        adminDeleteTasks,
         adminReviewTask,
         adminTogglePayment,
         adminLogin,

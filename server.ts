@@ -436,14 +436,14 @@ app.get('/api/operators', async (_req, res) => {
         o.is_active,
         o.pin,
         COUNT(DISTINCT CASE
-          WHEN t.status IN ('submitted', 'approved', 'rejected') THEN t.id
+          WHEN t.status = 'approved' THEN t.id
         END) AS total_completed_tasks,
         COALESCE(SUM(CASE
-          WHEN t.status IN ('submitted', 'approved', 'rejected') AND n.status = 'done' THEN 1
+          WHEN t.status = 'approved' AND n.status = 'done' THEN 1
           ELSE 0
         END), 0) AS total_completed_numbers,
         COALESCE(SUM(CASE
-          WHEN t.status IN ('submitted', 'approved', 'rejected') AND n.status = 'failed' THEN 1
+          WHEN t.status = 'approved' AND n.status = 'failed' THEN 1
           ELSE 0
         END), 0) AS total_failed_numbers
       FROM operators o
@@ -749,6 +749,22 @@ app.delete('/api/tasks/:id', async (req, res) => {
   }
 });
 
+// Admin Delete Tasks in bulk
+app.post('/api/tasks/bulk-delete', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Pilih minimal satu task' });
+    const placeholders = ids.map(() => '?').join(',');
+    await execute(`DELETE FROM task_numbers WHERE task_id IN (${placeholders})`, ids);
+    await execute(`DELETE FROM proof_videos WHERE task_id IN (${placeholders})`, ids);
+    await execute(`DELETE FROM task_reviews WHERE task_id IN (${placeholders})`, ids);
+    await execute(`DELETE FROM tasks WHERE id IN (${placeholders})`, ids);
+    res.json({ success: true, deleted: ids.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 9. Worker Claim Top Task
 app.post('/api/tasks/claim-next', async (req, res) => {
   try {
@@ -1003,16 +1019,18 @@ app.post('/api/tasks/:id/toggle-payment', async (req, res) => {
 });
 
 // 16. Real dynamic stats from SQLite
-app.get('/api/stats', async (_req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
+    const requestedDate = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+      ? req.query.date : new Date().toISOString().slice(0, 10);
     const totalDoneRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers WHERE status = 'done'"
+      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'done' AND t.status = 'approved' AND date(COALESCE(t.completed_at, n.updated_at)) = ?", [requestedDate]
     );
     const totalFailedRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers WHERE status = 'failed'"
+      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'failed' AND t.status = 'approved' AND date(COALESCE(t.completed_at, n.updated_at)) = ?", [requestedDate]
     );
     const submittedTasksRow = await queryOne(
-      "SELECT COUNT(*) as c FROM tasks WHERE status IN ('submitted', 'approved', 'rejected')"
+      "SELECT COUNT(*) as c FROM tasks WHERE status IN ('submitted', 'approved', 'rejected') AND date(COALESCE(completed_at, created_at)) = ?", [requestedDate]
     );
     const activeWorkersRow = await queryOne(
       'SELECT COUNT(*) as c FROM operators WHERE is_active = 1'
@@ -1029,7 +1047,8 @@ app.get('/api/stats', async (_req, res) => {
          SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
        FROM task_numbers
-       WHERE updated_at IS NOT NULL AND date(updated_at) = date('now')
+       JOIN tasks t ON t.id = task_numbers.task_id
+       WHERE updated_at IS NOT NULL AND t.status = 'approved' AND date(COALESCE(t.completed_at, updated_at)) = ?
        GROUP BY hour`
     );
     const hourlyCompleted = Array(24).fill(0);
@@ -1039,7 +1058,7 @@ app.get('/api/stats', async (_req, res) => {
         hourlyCompleted[row.hour] = row.completed || 0;
         hourlyFailed[row.hour] = row.failed || 0;
       }
-    });
+      }, [requestedDate]);
 
     res.json({
       completedNumbers: totalDoneRow?.c || 0,
@@ -1050,7 +1069,7 @@ app.get('/api/stats', async (_req, res) => {
       inProgressTasks: inProgressTasksRow?.c || 0,
       hourlyCompleted,
       hourlyFailed,
-      date: new Date().toISOString().slice(0, 10),
+      date: requestedDate,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
