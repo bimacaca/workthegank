@@ -77,6 +77,27 @@ export const AdminPanelView: React.FC = () => {
   } | null>(null);
   const [profilePhotos, setProfilePhotos] = useState<Record<string, string | null>>({});
   const [isLoadingProfilePhotos, setIsLoadingProfilePhotos] = useState(false);
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
+
+  const requestWhatsAppPairing = async () => {
+    try {
+      const response = await fetch('/api/whatsapp/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: pairingPhone }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Pairing gagal');
+      setPairingCode(data.pairingCode || null); setWhatsappStatus(data.connection || 'connecting');
+      showToast('Kode pairing berhasil dibuat. Masukkan di WhatsApp Perangkat Tertaut.');
+    } catch (error: any) { showToast(error.message || 'Pairing WhatsApp gagal'); }
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      const response = await fetch('/api/whatsapp/status').catch(() => null);
+      if (response?.ok) { const data = await response.json(); setWhatsappStatus(data.connection || 'disconnected'); if (data.pairingCode) setPairingCode(data.pairingCode); }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const loadProfilePhotos = async (task: Task) => {
     const numbers = (task.numbers || []).map((item) => item.phoneNumber).filter(Boolean);
@@ -502,6 +523,13 @@ didaftarin> https://cutt.ly/WhatsapLENA
                 <span>Akun Admin ({adminAccounts.length})</span>
               </button>
             </div>
+          </div>
+
+          <div className="bg-white border border-green-200 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1"><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div></div>
+            <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-full sm:w-44" />
+            <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold">Buat Pairing Code</button>
+            {pairingCode && <span className="font-mono font-bold tracking-widest text-green-800 bg-green-50 px-3 py-2 rounded-lg text-sm">{pairingCode}</span>}
           </div>
 
           {/* TAB 1: TINJAU VIDEO BUKTI */}

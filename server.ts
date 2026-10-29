@@ -454,14 +454,14 @@ app.get('/api/operators', async (_req, res) => {
         o.is_active,
         o.pin,
         COUNT(DISTINCT CASE
-          WHEN t.status = 'approved' THEN t.id
+          WHEN t.status IN ('submitted', 'approved') THEN t.id
         END) AS total_completed_tasks,
         COALESCE(SUM(CASE
-          WHEN t.status = 'approved' AND n.status = 'done' THEN 1
+          WHEN t.status IN ('submitted', 'approved') AND n.status = 'done' THEN 1
           ELSE 0
         END), 0) AS total_completed_numbers,
         COALESCE(SUM(CASE
-          WHEN t.status = 'approved' AND n.status = 'failed' THEN 1
+          WHEN t.status IN ('submitted', 'approved') AND n.status = 'failed' THEN 1
           ELSE 0
         END), 0) AS total_failed_numbers
       FROM operators o
@@ -1042,10 +1042,10 @@ app.get('/api/stats', async (req, res) => {
     const requestedDate = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
       ? req.query.date : new Date().toISOString().slice(0, 10);
     const totalDoneRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'done' AND t.status = 'approved' AND date(COALESCE(t.completed_at, n.updated_at)) = ?", [requestedDate]
+      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'done' AND t.status IN ('submitted', 'approved')"
     );
     const totalFailedRow = await queryOne(
-      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'failed' AND t.status = 'approved' AND date(COALESCE(t.completed_at, n.updated_at)) = ?", [requestedDate]
+      "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'failed' AND t.status IN ('submitted', 'approved')"
     );
     const submittedTasksRow = await queryOne(
       "SELECT COUNT(*) as c FROM tasks WHERE status IN ('submitted', 'approved', 'rejected') AND date(COALESCE(completed_at, created_at)) = ?", [requestedDate]
@@ -1066,7 +1066,7 @@ app.get('/api/stats', async (req, res) => {
          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
        FROM task_numbers
        JOIN tasks t ON t.id = task_numbers.task_id
-       WHERE updated_at IS NOT NULL AND t.status = 'approved' AND date(COALESCE(t.completed_at, updated_at)) = ?
+       WHERE updated_at IS NOT NULL AND t.status IN ('submitted', 'approved') AND date(COALESCE(t.completed_at, updated_at)) = ?
        GROUP BY hour`
     );
     const hourlyCompleted = Array(24).fill(0);
