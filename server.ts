@@ -9,6 +9,7 @@ import { createWorker } from 'tesseract.js';
 import ffmpegPath from 'ffmpeg-static';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
+import { baileysStatus, checkProfilePhoto, requestPairing, startBaileys } from './server/baileys.js';
 
 const app = express();
 const PORT = 3005;
@@ -51,6 +52,23 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max
+});
+
+// WhatsApp/Baileys pairing and profile-photo checking
+app.get('/api/whatsapp/status', (_req, res) => res.json(baileysStatus()));
+app.post('/api/whatsapp/pair', async (req, res) => {
+  try {
+    const code = await requestPairing(String(req.body?.phone || ''));
+    res.json({ ...baileysStatus(), pairingCode: code });
+  } catch (err: any) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/whatsapp/profile-photo', async (req, res) => {
+  try {
+    const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers : [req.body?.phone];
+    const results = [];
+    for (const number of numbers.filter(Boolean)) results.push(await checkProfilePhoto(String(number)));
+    res.json({ results });
+  } catch (err: any) { res.status(400).json({ error: err.message }); }
 });
 
 const normalizePhone = (value: string) => {
@@ -1082,6 +1100,8 @@ async function startServer() {
 
   // Initialize SQLite database
   await getDb();
+  // Reuse an existing Baileys auth session after restart; pairing is requested via API.
+  void startBaileys().catch((error) => console.error('[Baileys] failed to start:', error.message));
   await execute(`
     INSERT OR IGNORE INTO admins (id, username, password, created_at, role)
     VALUES ('adm-primary', 'admin', 'admin123', '2026-10-24 00:00', 'super_admin');

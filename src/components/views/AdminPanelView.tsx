@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
@@ -75,6 +75,31 @@ export const AdminPanelView: React.FC = () => {
     checkedVideos: number; framesScanned: number;
     matched: string[]; missing: string[]; note: string;
   } | null>(null);
+  const [profilePhotos, setProfilePhotos] = useState<Record<string, string | null>>({});
+  const [isLoadingProfilePhotos, setIsLoadingProfilePhotos] = useState(false);
+
+  const loadProfilePhotos = async (task: Task) => {
+    const numbers = (task.numbers || []).map((item) => item.phoneNumber).filter(Boolean);
+    if (!numbers.length) return;
+    setIsLoadingProfilePhotos(true);
+    try {
+      const response = await fetch('/api/whatsapp/profile-photo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numbers }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'WhatsApp belum terhubung');
+      setProfilePhotos(Object.fromEntries((data.results || []).map((item: { phone: string; photoUrl: string | null }) => [item.phone, item.photoUrl])));
+    } catch (error: any) {
+      showToast(error.message || 'Foto profil belum dapat dimuat');
+    } finally { setIsLoadingProfilePhotos(false); }
+  };
+
+  useEffect(() => {
+    if (selectedTaskToReview) void loadProfilePhotos(selectedTaskToReview);
+    // The selected task is the trigger; the loader intentionally uses the current task snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaskToReview?.id]);
 
   const checkNumbersInVideo = async (taskId: string) => {
     setIsCheckingNumbers(true);
@@ -563,6 +588,31 @@ didaftarin> https://cutt.ly/WhatsapLENA
                             </p>
                           </div>
                           <span className="text-xs font-mono text-gray-400">ID #{selectedTaskToReview.id}</span>
+                        </div>
+
+                        <div className="border border-gray-200 rounded-xl overflow-hidden">
+                          <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-2">
+                            <div>
+                              <h3 className="text-xs font-bold text-gray-900">Daftar Kontak Task ({selectedTaskToReview.numbers?.length || 0})</h3>
+                              <p className="text-[11px] text-gray-500">Foto profil diambil dari WhatsApp Baileys.</p>
+                            </div>
+                            <button type="button" onClick={() => void loadProfilePhotos(selectedTaskToReview)} disabled={isLoadingProfilePhotos}
+                              className="px-2.5 py-1.5 rounded-md bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-[11px] font-semibold">
+                              {isLoadingProfilePhotos ? 'Memuat…' : 'Muat Foto Profil'}
+                            </button>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+                            {(selectedTaskToReview.numbers || []).map((number) => {
+                              const photo = profilePhotos[number.phoneNumber];
+                              return (
+                                <div key={number.id} className="flex items-center gap-3 px-3 py-2">
+                                  {photo ? <img src={photo} alt={`Foto profil ${number.phoneNumber}`} className="w-9 h-9 rounded-full object-cover border border-gray-200" /> : <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">?</div>}
+                                  <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-gray-800">{number.phoneNumber}</div><div className="text-[10px] text-gray-500">Nomor #{number.no} · {number.status === 'done' ? 'Selesai' : number.status === 'failed' ? 'Gagal' : 'Belum selesai'}</div></div>
+                                  <span className={`text-[10px] ${photo ? 'text-emerald-700' : 'text-gray-400'}`}>{photo ? 'Foto tersedia' : 'Tidak ada foto'}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
 
                         {/* Video Player Box */}
