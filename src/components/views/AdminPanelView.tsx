@@ -536,13 +536,15 @@ didaftarin> https://cutt.ly/WhatsapLENA
             </div>
           </div>
 
-          <div className="bg-white border border-green-200 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex-1"><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div></div>
-            <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-full sm:w-44" />
-            <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold">Buat Pairing Code</button>
-            <button type="button" onClick={() => void requestWhatsAppQr()} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-xs font-semibold">Tampilkan QR</button>
-            {pairingCode && <span className="font-mono font-bold tracking-widest text-green-800 bg-green-50 px-3 py-2 rounded-lg text-sm">{pairingCode}</span>}
-            {whatsappQr && <img src={whatsappQr} alt="QR WhatsApp Baileys" className="w-28 h-28 rounded-lg border border-gray-200 bg-white p-1" />}
+          <div className="bg-white border border-green-200 rounded-xl p-3 sm:p-4 space-y-3">
+            <div><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-48" />
+              <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold cursor-pointer">Buat Pairing Code</button>
+              <button type="button" onClick={() => void requestWhatsAppQr()} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-xs font-semibold cursor-pointer">Tampilkan QR</button>
+            </div>
+            {pairingCode && <div className="inline-block font-mono font-bold tracking-widest text-green-800 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-sm">Kode: {pairingCode}</div>}
+            {whatsappQr && <div><p className="text-[11px] text-gray-500 mb-1">Scan QR ini dari WhatsApp → Perangkat tertaut</p><img src={whatsappQr} alt="QR WhatsApp Baileys" className="w-40 h-40 rounded-lg border border-gray-200 bg-white p-1" /></div>}
           </div>
 
           {/* TAB 1: TINJAU VIDEO BUKTI */}

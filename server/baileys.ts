@@ -22,6 +22,7 @@ export async function startBaileys(phone?: string): Promise<void> {
   connecting = (async () => {
     fs.mkdirSync(AUTH_DIR, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    qrCode = null;
     socket = makeWASocket({ auth: state, browser: Browsers.ubuntu('Chrome'), printQRInTerminal: false });
     socket.ev.on('creds.update', saveCreds);
     socket.ev.on('connection.update', async ({ connection: next, lastDisconnect, qr }) => {
@@ -54,6 +55,9 @@ export const baileysStatus = () => ({ connection, paired: Boolean(socket?.user),
 
 export async function requestQr() {
   await startBaileys();
+  for (let attempt = 0; attempt < 20 && !qrCode; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
   return qrCode;
 }
 
