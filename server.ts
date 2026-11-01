@@ -3,17 +3,17 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import { spawn } from 'child_process';
-import os from 'os';
-import { createWorker } from 'tesseract.js';
-import ffmpegPath from 'ffmpeg-static';
+import { fork } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
 import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaileys } from './server/baileys.js';
 
 const app = express();
 const PORT = 3005;
-const OCR_MAX_FRAMES_PER_VIDEO = 60;
+// OCR is deliberately bounded. A review must finish quickly, but it must never
+// mark a number as present from a partial/ambiguous OCR hit.
+const OCR_MAX_FRAMES_TOTAL = 8;
+const OCR_JOB_TIMEOUT_MS = 28_000;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
@@ -82,80 +82,58 @@ const normalizePhone = (value: string) => {
   return digits;
 };
 
-async function getVideoDurationSeconds(videoPath: string): Promise<number> {
-  if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
+function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ text: string; framesScanned: number }[]> {
   return new Promise((resolve, reject) => {
-    const probe = spawn(ffmpegPath as string, ['-hide_banner', '-i', videoPath]);
-    let stderr = '';
-    probe.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+    const worker = fork(path.resolve(process.cwd(), 'server/ocr-worker.mjs'), [], {
+      execArgv: [],
+      silent: true,
     });
-    probe.on('error', reject);
-    probe.on('close', () => {
-      const match = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
-      if (!match) {
-        reject(new Error('Durasi video tidak dapat dibaca'));
-        return;
+    const timeout = setTimeout(() => {
+      worker.kill('SIGKILL');
+      reject(new Error('Check Nomor dihentikan setelah 28 detik'));
+    }, OCR_JOB_TIMEOUT_MS);
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    worker.once('error', (error) => finish(() => reject(error)));
+    worker.once('exit', (code) => {
+      if (!settled) finish(() => reject(new Error(`Worker OCR berhenti sebelum selesai (kode ${code ?? 'tidak diketahui'})`)));
+    });
+    worker.on('message', (message: { type: string; scans?: { text: string; framesScanned: number }[]; error?: string }) => {
+      if (message.type === 'result' && message.scans) {
+        finish(() => {
+          worker.disconnect();
+          resolve(message.scans!);
+        });
+      } else if (message.type === 'error') {
+        finish(() => reject(new Error(message.error || 'Worker OCR gagal')));
       }
-      const duration = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
-      if (!Number.isFinite(duration) || duration <= 0) {
-        reject(new Error('Durasi video tidak valid'));
-        return;
-      }
-      resolve(duration);
+    });
+    worker.send({ proofFiles, maxFrames }, (error) => {
+      if (error) finish(() => reject(error));
     });
   });
-}
-
-async function extractTextFromVideo(videoPath: string): Promise<{ text: string; framesScanned: number }> {
-  if (!ffmpegPath) throw new Error('Pemroses video lokal belum tersedia');
-  const duration = await getVideoDurationSeconds(videoPath);
-  const samplingRate = (OCR_MAX_FRAMES_PER_VIDEO / duration).toFixed(10);
-  const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtg-ocr-'));
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const process: any = spawn(ffmpegPath as string, [
-        '-i', videoPath, '-vf', `fps=${samplingRate},scale=1600:-2:flags=lanczos,format=gray,eq=contrast=1.15:brightness=0.02`, '-frames:v', String(OCR_MAX_FRAMES_PER_VIDEO),
-        path.join(frameDir, 'frame-%03d.jpg'),
-      ]);
-      process.on('error', reject);
-      process.on('close', (code: number) => code === 0 ? resolve() : reject(new Error('Gagal membaca video')));
-    });
-    const frames = fs.readdirSync(frameDir).filter((file) => file.endsWith('.jpg'));
-    const worker = await createWorker('eng', 1, {
-      langPath: path.resolve(process.cwd(), 'node_modules/@tesseract.js-data/eng/4.0.0'),
-      gzip: true,
-    });
-    try {
-      const text: string[] = [];
-      for (const frame of frames) {
-        const result = await worker.recognize(path.join(frameDir, frame), {}, { text: true });
-        text.push(result.data.text);
-      }
-      return { text: text.join('\n'), framesScanned: frames.length };
-    } finally {
-      await worker.terminate();
-    }
-  } finally {
-    fs.rmSync(frameDir, { recursive: true, force: true });
-  }
 }
 
 function phoneAppearsInOcr(recognizedText: string, phoneNumber: string): boolean {
   const digits = normalizePhone(phoneNumber);
   if (digits.length < 7) return false;
 
-  // A WhatsApp list may put a timestamp beside the phone on the same OCR line.
-  // Remove clock strings, then match the complete digit sequence. Do not
-  // globally convert letters such as O/S/B to digits; that creates false hits
-  // in unrelated interface text.
-  const lines = recognizedText
-    .replace(/\b\d{1,2}:\d{2}\b/g, ' ')
-    .split(/\r?\n/);
-  const numberPattern = [...digits].join('[\\s().-]*');
-  const exactNumber = new RegExp(`(?:^|[^\\d\\s().-])${numberPattern}(?![\\s().-]*\\d)`);
-
-  return lines.some((line) => exactNumber.test(line));
+  // Only accept a complete phone-shaped OCR token. We intentionally do not
+  // use fuzzy character substitution: a false positive is worse than asking
+  // the reviewer to inspect one ambiguous frame manually.
+  const accepted = new Set([digits]);
+  if (digits.startsWith('62')) accepted.add(`0${digits.slice(2)}`);
+  const lines = recognizedText.split(/\r?\n/);
+  return lines.some((line) => {
+    const withoutClock = line.replace(/\b\d{1,2}:\d{2}\b/g, ' ');
+    const candidates = withoutClock.match(/\+?\d[\d\s().-]{5,}\d/g) || [];
+    return candidates.some((candidate) => accepted.has(normalizePhone(candidate)));
+  });
 }
 
 // Helper: Run query and return array of objects
@@ -873,8 +851,17 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
     res.status(202).json({ jobId, status: 'processing' });
 
     setImmediate(async () => {
+      const hardTimeout = setTimeout(() => {
+        const job = numberCheckJobs.get(jobId);
+        if (job?.status === 'processing') {
+          job.status = 'failed';
+          job.error = 'Pengecekan nomor dihentikan setelah 28 detik. Periksa video secara manual.';
+          job.updatedAt = Date.now();
+        }
+      }, OCR_JOB_TIMEOUT_MS);
       try {
-        const videoScans = await Promise.all(proofFiles.map(extractTextFromVideo));
+        const framesPerVideo = Math.max(2, Math.floor(OCR_MAX_FRAMES_TOTAL / proofFiles.length));
+        const videoScans = await scanVideosInWorker(proofFiles, framesPerVideo);
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
@@ -893,7 +880,7 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
             framesScanned,
             matched: matched.map((number: any) => number.phoneNumber),
             missing: missing.map((number: any) => number.phoneNumber),
-            note: `Pengecekan OCR lokal: ${matched.length}/${taskNumbers.length} nomor task cocok penuh pada ${framesScanned} frame (maksimal ${OCR_MAX_FRAMES_PER_VIDEO} frame per video). Digit tambahan sebelum atau sesudah nomor tidak dihitung sebagai cocok. OCR tidak menjamin akurasi 100%; periksa video secara langsung.`,
+            note: `Pencocokan ketat selesai: ${matched.length}/${taskNumbers.length} nomor terbaca lengkap pada ${framesScanned} frame. Nomor hanya dianggap cocok jika seluruh digit terbaca tanpa tambahan digit; hasil yang tidak terbaca harus dikonfirmasi dari video.`,
           };
           job.updatedAt = Date.now();
         }
@@ -904,6 +891,8 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
           job.error = `Pengecekan nomor gagal: ${err.message}`;
           job.updatedAt = Date.now();
         }
+      } finally {
+        clearTimeout(hardTimeout);
       }
     });
   } catch (err: any) {
