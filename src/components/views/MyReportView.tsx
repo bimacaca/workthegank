@@ -19,9 +19,23 @@ export const MyReportView: React.FC = () => {
     (t) => t.review !== undefined || t.status === 'approved' || t.status === 'rejected'
   );
 
-  const totalCompletedNumbers = myTasks.reduce((sum, t) => {
-    return sum + (t.numbers?.filter((n) => n.status === 'done').length || 0);
-  }, 0);
+  const completedTasks = myTasks.filter(
+    (task) =>
+      (task.status === 'approved' || task.review?.status === 'approved') &&
+      task.status !== 'rejected' &&
+      task.review?.status !== 'rejected'
+  );
+  const getCompletedCount = (task: (typeof myTasks)[number]) => {
+    if (task.review?.status === 'rejected' || task.status === 'rejected') return 0;
+    if (task.review?.status === 'approved' || task.status === 'approved') {
+      return Number.isFinite(Number(task.review?.verifiedCount))
+        ? Number(task.review?.verifiedCount)
+        : task.numbers?.filter((number) => number.status === 'done').length || 0;
+    }
+    return task.numbers?.filter((number) => number.status === 'done').length || 0;
+  };
+
+  const totalCompletedNumbers = completedTasks.reduce((sum, task) => sum + getCompletedCount(task), 0);
 
   return (
     <div className="min-h-screen bg-[#fcfdfd] flex flex-col text-gray-800">
@@ -124,9 +138,9 @@ export const MyReportView: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {myTasks.length > 0 ? (
-                      myTasks.map((t) => {
-                        const done = t.numbers?.filter((n) => n.status === 'done').length || 0;
+                    {completedTasks.length > 0 ? (
+                      completedTasks.map((t) => {
+                        const done = getCompletedCount(t);
                         const status = t.payment_status || t.paymentStatus || 'unpaid';
 
                         return (
@@ -161,7 +175,7 @@ export const MyReportView: React.FC = () => {
                     )}
 
                     {/* Total row */}
-                    {myTasks.length > 0 && (
+                    {completedTasks.length > 0 && (
                       <tr className="bg-gray-100/60 font-bold text-xs border-t border-gray-200">
                         <td className="px-4 sm:px-5 py-3 text-gray-900" colSpan={2}>
                           Total
@@ -171,7 +185,7 @@ export const MyReportView: React.FC = () => {
                         </td>
                         <td className="px-4 sm:px-5 py-3 text-right">
                           <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-teal-800 bg-teal-100">
-                            {myTasks.filter((t) => (t.payment_status || t.paymentStatus) === 'unpaid').length} unpaid
+                            {completedTasks.filter((t) => (t.payment_status || t.paymentStatus) === 'unpaid').length} unpaid
                           </span>
                         </td>
                       </tr>
