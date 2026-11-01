@@ -48,6 +48,7 @@ export const AdminPanelView: React.FC = () => {
     adminLogout,
     showToast,
     refreshData,
+    navigate,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp'>('review');
@@ -128,12 +129,6 @@ export const AdminPanelView: React.FC = () => {
       showToast(error.message || 'Foto profil belum dapat dimuat');
     } finally { setIsLoadingProfilePhotos(false); }
   };
-
-  useEffect(() => {
-    if (selectedTaskToReview) void loadProfilePhotos(selectedTaskToReview);
-    // The selected task is the trigger; the loader intentionally uses the current task snapshot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskToReview?.id]);
 
   const checkNumbersInVideo = async (taskId: string) => {
     setIsCheckingNumbers(true);
@@ -578,7 +573,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6">
                   {/* Left Column: List */}
                   <div className="lg:col-span-1 space-y-3">
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -593,10 +588,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                         return (
                           <div
                             key={t.id}
-                            onClick={() => {
-                              setSelectedTaskToReview(t);
-                              setVerifiedCount(doneCount);
-                            }}
+                            onClick={() => navigate(`/admin/tasks/${t.id}/review`)}
                             className={`p-3.5 sm:p-4 rounded-xl border transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-amber-50/70 border-amber-400 shadow-xs ring-1 ring-amber-300'
@@ -632,7 +624,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                   </div>
 
                   {/* Right Column: Player & Review Decision */}
-                  <div className="lg:col-span-2">
+                  <div className="hidden">
                     {selectedTaskToReview ? (
                       <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 shadow-xs space-y-4 sm:space-y-5">
                         <div className="flex items-start justify-between border-b border-gray-100 pb-3">
