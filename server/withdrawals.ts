@@ -188,6 +188,58 @@ export function registerWithdrawalRoutes(app: Express) {
     }
   });
 
+  app.get('/api/admin/payment-report', async (_req, res) => {
+    try {
+      const currentRate = await getWithdrawalRate();
+      const rows = await queryAll(`
+        SELECT t.id, t.code, t.store, t.operator_name, t.completed_at,
+          COALESCE(t.payment_status, 'unpaid') AS payment_status,
+          r.verified_count,
+          MAX(wr.rate_per_number) AS paid_rate,
+          MAX(wr.reviewed_at) AS paid_at
+        FROM tasks t
+        JOIN task_reviews r ON r.task_id = t.id AND r.status = 'approved'
+        LEFT JOIN withdrawal_request_tasks wrt ON wrt.task_id = t.id
+        LEFT JOIN withdrawal_requests wr ON wr.id = wrt.request_id AND wr.status = 'approved'
+        WHERE t.status = 'approved'
+        GROUP BY t.id
+        ORDER BY datetime(COALESCE(t.completed_at, t.created_at)) DESC
+      `);
+      const tasks = rows.map((row) => {
+        const verifiedCount = Number(row.verified_count || 0);
+        const ratePerNumber = row.paid_rate === null || row.paid_rate === undefined
+          ? currentRate
+          : Number(row.paid_rate);
+        return {
+          id: row.id,
+          code: row.code,
+          store: row.store,
+          operatorName: row.operator_name,
+          completedAt: row.completed_at,
+          status: row.payment_status === 'paid' ? 'paid' : 'unpaid',
+          verifiedCount,
+          ratePerNumber,
+          amount: verifiedCount * ratePerNumber,
+          paidAt: row.paid_at,
+        };
+      });
+      res.json({
+        currentRate,
+        tasks,
+        summary: {
+          paidTasks: tasks.filter((task) => task.status === 'paid').length,
+          unpaidTasks: tasks.filter((task) => task.status === 'unpaid').length,
+          paidNumbers: tasks.filter((task) => task.status === 'paid').reduce((sum, task) => sum + task.verifiedCount, 0),
+          unpaidNumbers: tasks.filter((task) => task.status === 'unpaid').reduce((sum, task) => sum + task.verifiedCount, 0),
+          paidAmount: tasks.filter((task) => task.status === 'paid').reduce((sum, task) => sum + task.amount, 0),
+          unpaidAmount: tasks.filter((task) => task.status === 'unpaid').reduce((sum, task) => sum + task.amount, 0),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get('/api/admin/withdrawal-rate', async (_req, res) => {
     try {
       res.json({ ratePerNumber: await getWithdrawalRate() });

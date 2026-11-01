@@ -20,6 +20,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { Task, NumberStatus } from '../../types';
+import { AdminPaymentReportView } from './AdminPaymentReportView';
 
 const formatPhoneForDisplay = (phoneNumber: string) => {
   const digits = phoneNumber.replace(/\D/g, '');
@@ -73,7 +74,7 @@ export const AdminPanelView: React.FC = () => {
     navigate,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp' | 'withdrawals'>('review');
+  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp' | 'withdrawals' | 'payment_report'>('review');
   const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalAdminRequest[]>([]);
   const [withdrawalReviewNotes, setWithdrawalReviewNotes] = useState<Record<string, string>>({});
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
@@ -639,6 +640,14 @@ didaftarin> https://cutt.ly/WhatsapLENA
               </button>
 
               <button
+                onClick={() => setActiveTab('payment_report')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${activeTab === 'payment_report' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                <Wallet className="w-3.5 h-3.5 text-blue-700" />
+                <span>Laporan Pembayaran</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('add_task')}
                 className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                   activeTab === 'add_task'
@@ -697,6 +706,8 @@ didaftarin> https://cutt.ly/WhatsapLENA
               </button>
             </div>
           </div>
+
+          {activeTab === 'payment_report' && <AdminPaymentReportView />}
 
           {activeTab === 'withdrawals' && <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3">
