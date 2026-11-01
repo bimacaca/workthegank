@@ -185,7 +185,7 @@ export const AdminPanelView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: any;
-      const deadline = Date.now() + 20 * 60 * 1000;
+      const deadline = Date.now() + 2 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);

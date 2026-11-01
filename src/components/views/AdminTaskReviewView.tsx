@@ -83,17 +83,19 @@ export const AdminTaskReviewView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: NumberCheckResult | null = null;
-      while (true) {
+      const deadline = Date.now() + 2 * 60 * 1000;
+      while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 650));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
         const status = await statusResponse.json().catch(() => ({}));
-        if (!statusResponse.ok) continue;
+        if (!statusResponse.ok) throw new Error(status.error || 'Pengecekan gagal');
+        if (status.status === 'failed') throw new Error(status.error || 'Pengecekan OCR gagal');
         if (status.status === 'completed') {
           result = status.result;
           break;
         }
       }
-      if (!result) throw new Error('Pengecekan belum menghasilkan data.');
+      if (!result) throw new Error('Pengecekan memakan waktu terlalu lama. Coba lagi atau tinjau video secara manual.');
       setNumberCheckResult(result);
       setApprovalNotes(result.note);
     } catch (error: any) {

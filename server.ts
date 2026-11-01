@@ -10,10 +10,9 @@ import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaile
 
 const app = express();
 const PORT = 3005;
-// OCR is deliberately bounded. A review must finish quickly, but it must never
-// mark a number as present from a partial/ambiguous OCR hit.
-const OCR_MAX_FRAMES_TOTAL = 60;
-const OCR_JOB_TIMEOUT_MS = 60_000;
+// Sample broadly across proof videos while keeping OCR work bounded.
+const OCR_MAX_FRAMES_TOTAL = 24;
+const OCR_JOB_TIMEOUT_MS = 90_000;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
@@ -117,19 +116,6 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
       if (error) finish(() => reject(error));
     });
   });
-}
-
-async function scanVideosUntilComplete(proofFiles: string[], maxFrames: number) {
-  // A slow OCR worker is restarted and retried instead of failing the review.
-  // This keeps checking until a complete scan is available.
-  while (true) {
-    try {
-      return await scanVideosInWorker(proofFiles, maxFrames);
-    } catch (error) {
-      console.warn('[OCR] Worker gagal, mencoba lagi:', (error as Error)?.message || error);
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
 }
 
 function phoneAppearsInOcr(recognizedText: string, phoneNumber: string): boolean {
@@ -866,7 +852,7 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
     setImmediate(async () => {
       try {
         const framesPerVideo = Math.max(2, Math.floor(OCR_MAX_FRAMES_TOTAL / proofFiles.length));
-        const videoScans = await scanVideosUntilComplete(proofFiles, framesPerVideo);
+        const videoScans = await scanVideosInWorker(proofFiles, framesPerVideo);
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
@@ -892,8 +878,8 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
       } catch (err: any) {
         const job = numberCheckJobs.get(jobId);
         if (job) {
-          job.status = 'processing';
-          job.error = `Pengecekan masih diulang: ${err.message}`;
+          job.status = 'failed';
+          job.error = `Pengecekan OCR gagal: ${err.message}`;
           job.updatedAt = Date.now();
         }
       }
