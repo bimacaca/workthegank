@@ -156,14 +156,29 @@ export async function requestQr() {
 }
 
 export async function checkProfilePhoto(phone: string) {
-  if (!socket || connection !== 'open') throw new Error('WhatsApp belum terhubung. Minta pairing terlebih dahulu.');
+  if (!socket || connection !== 'open' || !socket.user) {
+    throw new Error('WhatsApp belum terhubung. Minta pairing terlebih dahulu.');
+  }
   const jid = jidFromPhone(phone);
   try {
     const url = await socket.profilePictureUrl(jid, 'image');
     return { phone, exists: true, photoUrl: url };
   } catch (error: any) {
-    const message = String(error?.message || error || '').toLowerCase();
-    if (error?.output?.statusCode === 404 || error?.status === 404 || message.includes('item-not-found') || message.includes('item not found')) {
+    const message = [
+      error?.message,
+      error?.data?.attrs?.type,
+      error?.output?.payload?.message,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const statusCode = error?.output?.statusCode ?? error?.status;
+    if (
+      statusCode === 404 ||
+      message.includes('item-not-found') ||
+      message.includes('item not found') ||
+      message.includes('not-authorized') ||
+      message.includes('not authorized')
+    ) {
+      // WhatsApp can deny access to an individual profile photo due to that
+      // account's privacy settings. This is not a disconnected Baileys session.
       return { phone, exists: false, photoUrl: null };
     }
     throw error;
