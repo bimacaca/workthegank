@@ -49,11 +49,11 @@ export const Sidebar: React.FC = () => {
       icon: <User className="w-4 h-4" />,
       badge: 3,
     },
-    {
+    ...(userRole !== 'admin' ? [{
       path: '/work/withdraw',
       label: 'Withdraw',
       icon: <Wallet className="w-4 h-4" />,
-    },
+    }] : []),
   ];
 
   // Tab Panel Admin strictly only visible if authenticated userRole is admin

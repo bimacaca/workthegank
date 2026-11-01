@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { LoginView } from './components/views/LoginView';
 import { TaskListView } from './components/views/TaskListView';
@@ -15,7 +15,13 @@ import { AdminTaskReviewView } from './components/views/AdminTaskReviewView';
 import { CheckCircle2 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { currentPath, isLoggedIn, activeAdmin, userRole, toastMessage } = useApp();
+  const { currentPath, isLoggedIn, activeAdmin, userRole, toastMessage, navigate } = useApp();
+
+  useEffect(() => {
+    if (isLoggedIn && userRole === 'admin' && currentPath.startsWith('/work/withdraw')) {
+      navigate('/admin');
+    }
+  }, [currentPath, isLoggedIn, navigate, userRole]);
 
   // 1. Unauthenticated or explicitly on /login or /admin/login
   if (!isLoggedIn || currentPath === '/login' || currentPath === '/admin/login') {
@@ -33,7 +39,7 @@ const AppContent: React.FC = () => {
   }
 
   // 2. Admin Panel Routes: /admin or /work/admin
-  if (currentPath.startsWith('/admin') || currentPath.startsWith('/work/admin')) {
+  if (currentPath.startsWith('/admin') || currentPath.startsWith('/work/admin') || (userRole === 'admin' && currentPath.startsWith('/work/withdraw'))) {
     // If not authenticated as admin, prompt via LoginView
     if (!activeAdmin || userRole !== 'admin') {
       return (

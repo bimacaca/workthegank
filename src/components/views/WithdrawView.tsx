@@ -47,8 +47,10 @@ export const WithdrawView: React.FC = () => {
     }
     setLoading(true);
     setLoadError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await fetch(`/api/withdrawals?operatorName=${encodeURIComponent(activeOperator.name)}`);
+      const response = await fetch(`/api/withdrawals?operatorName=${encodeURIComponent(activeOperator.name)}`, { signal: controller.signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Gagal memuat data withdraw');
       setEligibleTasks(data.eligibleTasks || []);
@@ -57,8 +59,11 @@ export const WithdrawView: React.FC = () => {
       const availableIds = new Set((data.eligibleTasks || []).map((task: EligibleTask) => task.id));
       setSelectedIds((previous) => previous.filter((id) => availableIds.has(id)));
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Gagal memuat data withdraw');
+      setLoadError(error instanceof Error && error.name === 'AbortError'
+        ? 'Server terlalu lama merespons. Periksa koneksi lalu coba muat ulang.'
+        : error instanceof Error ? error.message : 'Gagal memuat data withdraw');
     } finally {
+      window.clearTimeout(timeout);
       setLoading(false);
     }
   }, [activeOperator]);
@@ -111,15 +116,31 @@ export const WithdrawView: React.FC = () => {
           </div>
 
           {!activeOperator && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Pilih sesi pengerja terlebih dahulu untuk melihat task withdraw.</div>}
-          {loadError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{loadError}</div>}
 
-          {activeOperator && <form onSubmit={(event) => void submitRequest(event)} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-5">
+          {activeOperator && loading && <section className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+            <RefreshCw className="w-5 h-5 text-teal-700 animate-spin mx-auto mb-2" />
+            <p className="text-sm font-semibold text-gray-800">Memuat task yang memenuhi syarat</p>
+            <p className="text-xs text-gray-500 mt-1">Kami mencari task yang sudah disetujui dan belum dibayar.</p>
+          </section>}
+          {activeOperator && !loading && !loadError && eligibleTasks.length === 0 && <section className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 text-center">
+            <Wallet className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+            <h2 className="text-sm font-bold text-gray-900">Belum ada task yang bisa di-withdraw</h2>
+            <p className="text-xs text-gray-500 max-w-md mx-auto mt-1">Task akan muncul di sini setelah peninjau menyetujuinya dan task masih berstatus Unpaid. Permintaan yang menunggu verifikasi admin juga tidak dapat diajukan ulang.</p>
+            <button type="button" onClick={() => void loadWithdrawals()} className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold hover:bg-gray-50"><RefreshCw className="w-3.5 h-3.5" />Periksa lagi</button>
+          </section>}
+          {activeOperator && !loading && loadError && <section className="bg-white border border-rose-200 rounded-xl p-6 text-center">
+            <h2 className="text-sm font-bold text-gray-900">Daftar withdraw belum dapat dimuat</h2>
+            <p className="text-xs text-rose-700 mt-1">{loadError}</p>
+            <button type="button" onClick={() => void loadWithdrawals()} className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold hover:bg-gray-50"><RefreshCw className="w-3.5 h-3.5" />Coba lagi</button>
+          </section>}
+
+          {activeOperator && !loading && eligibleTasks.length > 0 && <form onSubmit={(event) => void submitRequest(event)} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-5">
             <div className="flex items-center justify-between gap-3">
               <div><h2 className="font-bold text-sm text-gray-900">Task belum dibayar</h2><p className="text-xs text-gray-500 mt-1">Tarif saat ini <b className="text-teal-800">{rupiah(ratePerNumber)} / nomor valid</b>. Tarif permintaan dikunci saat dikirim.</p></div>
-              <button type="button" onClick={() => void loadWithdrawals()} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold hover:bg-gray-50"><RefreshCw className="w-3.5 h-3.5" />Muat ulang</button>
+              <button type="button" onClick={() => void loadWithdrawals()} disabled={loading} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50"><RefreshCw className="w-3.5 h-3.5" />Muat ulang</button>
             </div>
 
-            {loading ? <p className="text-xs text-gray-500 py-5 text-center">Memuat task…</p> : eligibleTasks.length ? <div className="border border-gray-200 rounded-lg overflow-hidden">
+            {eligibleTasks.length > 0 && <div className="border border-gray-200 rounded-lg overflow-hidden">
               <label className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-teal-700" />Pilih semua ({eligibleTasks.length})
               </label>
@@ -130,7 +151,7 @@ export const WithdrawView: React.FC = () => {
                   <span className="text-right shrink-0"><span className="block text-xs font-bold text-teal-800">{task.verifiedCount} nomor valid</span><span className="block text-[11px] text-gray-500">{rupiah(task.estimatedAmount)}</span></span>
                 </label>)}
               </div>
-            </div> : !loading && <div className="rounded-lg bg-gray-50 border border-gray-200 p-5 text-center text-xs text-gray-500">Belum ada task disetujui yang berstatus Unpaid dan belum masuk permintaan withdraw.</div>}
+            </div>}
 
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="text-xs font-semibold text-gray-700 space-y-1.5">Bank / e-wallet penerima<input required maxLength={80} value={bankName} onChange={(event) => setBankName(event.target.value)} placeholder="Contoh: BCA, BRI, GoPay" className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-teal-600" /></label>
@@ -146,7 +167,7 @@ export const WithdrawView: React.FC = () => {
 
           <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200"><h2 className="font-bold text-sm text-gray-900">Riwayat permintaan withdraw</h2></div>
-            {requests.length ? <div className="divide-y divide-gray-100">{requests.map((request) => <article key={request.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            {loading ? <p className="p-5 text-xs text-gray-500">Memuat riwayat…</p> : requests.length ? <div className="divide-y divide-gray-100">{requests.map((request) => <article key={request.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div><p className="text-xs font-bold text-gray-900">{request.taskCount} task · {request.totalVerified} nomor valid · {request.bankName}</p><p className="text-[11px] text-gray-700 font-semibold">{rupiah(request.amount)} · tarif {rupiah(request.ratePerNumber)}/nomor</p><p className="text-[11px] text-gray-500">{request.accountName} · {request.accountNumber} · {request.createdAt}</p>{request.reviewNote && <p className="text-[11px] text-gray-600 mt-1">Catatan admin: {request.reviewNote}</p>}</div>
               <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full self-start ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-800' : request.status === 'rejected' ? 'bg-rose-50 text-rose-800' : 'bg-amber-50 text-amber-800'}`}>{request.status === 'approved' ? <CheckCircle2 className="w-3.5 h-3.5" /> : request.status === 'rejected' ? <XCircle className="w-3.5 h-3.5" /> : <Clock3 className="w-3.5 h-3.5" />}{statusLabel[request.status]}</span>
             </article>)}</div> : <p className="p-5 text-xs text-gray-500">Belum ada permintaan pembayaran.</p>}
