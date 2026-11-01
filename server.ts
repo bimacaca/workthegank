@@ -7,6 +7,7 @@ import { fork } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { getDb, saveDb } from './server/db.js';
 import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaileys } from './server/baileys.js';
+import { registerWithdrawalRoutes } from './server/withdrawals.js';
 
 const app = express();
 const PORT = 3005;
@@ -31,6 +32,7 @@ const numberCheckJobs = new Map<string, {
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+registerWithdrawalRoutes(app);
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
@@ -1068,23 +1070,6 @@ app.post('/api/tasks/:id/review', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [taskId, reviewer || 'Admin', reviewedAt, verdict, doneCount, finalVerified, notes || '']
     );
-
-    const updated = await getFullTask(taskId);
-    res.json(updated);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 15. Toggle Payment
-app.post('/api/tasks/:id/toggle-payment', async (req, res) => {
-  try {
-    const taskId = req.params.id;
-    const task = await queryOne('SELECT payment_status FROM tasks WHERE id = ?', [taskId]);
-    if (!task) return res.status(404).json({ error: 'Task tidak ditemukan' });
-
-    const nextStatus = task.payment_status === 'unpaid' ? 'paid' : 'unpaid';
-    await execute('UPDATE tasks SET payment_status = ? WHERE id = ?', [nextStatus, taskId]);
 
     const updated = await getFullTask(taskId);
     res.json(updated);

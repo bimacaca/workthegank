@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   RefreshCw,
   X,
+  Wallet,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -47,7 +48,12 @@ export const Sidebar: React.FC = () => {
       label: 'Laporan Saya',
       icon: <User className="w-4 h-4" />,
       badge: 3,
-    }
+    },
+    {
+      path: '/work/withdraw',
+      label: 'Withdraw',
+      icon: <Wallet className="w-4 h-4" />,
+    },
   ];
 
   // Tab Panel Admin strictly only visible if authenticated userRole is admin

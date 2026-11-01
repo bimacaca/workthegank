@@ -113,6 +113,39 @@ function initTables(database: Database) {
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS withdrawal_requests (
+      id TEXT PRIMARY KEY,
+      operator_name TEXT NOT NULL,
+      bank_name TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      account_number TEXT NOT NULL,
+      notes TEXT,
+      rate_per_number INTEGER NOT NULL DEFAULT 500,
+      amount INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending', -- pending, approved, rejected
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      reviewed_by TEXT,
+      review_note TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS withdrawal_request_tasks (
+      request_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      verified_count INTEGER NOT NULL,
+      PRIMARY KEY (request_id, task_id),
+      FOREIGN KEY (request_id) REFERENCES withdrawal_requests(id) ON DELETE CASCADE,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL
+    );
+
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value)
+    VALUES ('withdrawal_rate_per_number', '500');
+
     CREATE TABLE IF NOT EXISTS admins (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -145,5 +178,16 @@ function initTables(database: Database) {
     database.run('ALTER TABLE tasks ADD COLUMN promo_image_url TEXT');
   } catch {
     // Existing installations already have this optional column.
+  }
+
+  for (const migration of [
+    'ALTER TABLE withdrawal_requests ADD COLUMN rate_per_number INTEGER NOT NULL DEFAULT 500',
+    'ALTER TABLE withdrawal_requests ADD COLUMN amount INTEGER NOT NULL DEFAULT 0',
+  ]) {
+    try {
+      database.run(migration);
+    } catch {
+      // Existing installations may already have these columns.
+    }
   }
 }

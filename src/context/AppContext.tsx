@@ -70,7 +70,6 @@ interface AppContextType {
     notes?: string,
     verifiedCount?: number
   ) => Promise<void>;
-  adminTogglePayment: (taskId: string) => Promise<void>;
 
   // Admin authentication & account management
   adminLogin: (user: string, pass: string) => Promise<boolean>;
@@ -805,21 +804,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Admin: Toggle payment
-  const adminTogglePayment = async (taskId: string) => {
-    try {
-      const res = await fetch(`/api/tasks/${taskId}/toggle-payment`, {
-        method: 'POST',
-      });
-      if (res.ok) {
-        await refreshData();
-        showToast(`Status pembayaran diperbarui`);
-      }
-    } catch (e) {
-      showToast('Gagal mengubah status pembayaran');
-    }
-  };
-
   return (
     <AppContext.Provider
       value={{
@@ -852,7 +836,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminDeleteTask,
         adminDeleteTasks,
         adminReviewTask,
-        adminTogglePayment,
         adminLogin,
         activeAdmin,
         adminAccounts,

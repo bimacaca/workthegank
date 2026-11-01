@@ -17,6 +17,7 @@ import {
   Sparkles,
   LogOut,
   Smartphone,
+  Wallet,
 } from 'lucide-react';
 import { Task, NumberStatus } from '../../types';
 
@@ -30,6 +31,27 @@ const parsePhoneNumbers = (value: string) =>
     .split(/[\r\n,;]+/)
     .map((number) => number.trim())
     .filter((number) => number.replace(/\D/g, '').length > 5);
+
+type WithdrawalAdminRequest = {
+  id: string;
+  operatorName: string;
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  notes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+  totalVerified: number;
+  taskCount: number;
+  ratePerNumber: number;
+  amount: number;
+  tasks: { id: string; code: string; store: string; verifiedCount: number }[];
+};
+
+const formatRupiah = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
 
 export const AdminPanelView: React.FC = () => {
   const {
@@ -51,7 +73,91 @@ export const AdminPanelView: React.FC = () => {
     navigate,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp'>('review');
+  const [activeTab, setActiveTab] = useState<'review' | 'add_task' | 'edit_task' | 'workers' | 'admin_users' | 'whatsapp' | 'withdrawals'>('review');
+  const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalAdminRequest[]>([]);
+  const [withdrawalReviewNotes, setWithdrawalReviewNotes] = useState<Record<string, string>>({});
+  const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
+  const [processingWithdrawalId, setProcessingWithdrawalId] = useState<string | null>(null);
+  const [withdrawalRate, setWithdrawalRate] = useState(500);
+  const [withdrawalRateInput, setWithdrawalRateInput] = useState('500');
+  const [isSavingWithdrawalRate, setIsSavingWithdrawalRate] = useState(false);
+
+  const loadWithdrawalRequests = async () => {
+    setIsLoadingWithdrawals(true);
+    try {
+      const [response, rateResponse] = await Promise.all([
+        fetch('/api/admin/withdrawals'),
+        fetch('/api/admin/withdrawal-rate'),
+      ]);
+      const [data, rateData] = await Promise.all([response.json(), rateResponse.json()]);
+      if (!response.ok) throw new Error(data.error || 'Gagal memuat permintaan pembayaran');
+      if (!rateResponse.ok) throw new Error(rateData.error || 'Gagal memuat tarif');
+      setWithdrawalRequests(data);
+      setWithdrawalRate(Number(rateData.ratePerNumber));
+      setWithdrawalRateInput(String(rateData.ratePerNumber));
+    } catch (error: any) {
+      showToast(error.message || 'Gagal memuat permintaan pembayaran');
+    } finally {
+      setIsLoadingWithdrawals(false);
+    }
+  };
+
+  const saveWithdrawalRate = async () => {
+    const ratePerNumber = Number(withdrawalRateInput);
+    if (!Number.isSafeInteger(ratePerNumber) || ratePerNumber < 0 || ratePerNumber > 1_000_000_000) {
+      showToast('Tarif harus bilangan bulat antara Rp 0 dan Rp 1.000.000.000');
+      return;
+    }
+    setIsSavingWithdrawalRate(true);
+    try {
+      const response = await fetch('/api/admin/withdrawal-rate', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ratePerNumber }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Gagal menyimpan tarif');
+      setWithdrawalRate(data.ratePerNumber);
+      setWithdrawalRateInput(String(data.ratePerNumber));
+      showToast('Tarif per nomor berhasil disimpan');
+    } catch (error: any) {
+      showToast(error.message || 'Gagal menyimpan tarif');
+    } finally {
+      setIsSavingWithdrawalRate(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'withdrawals') void loadWithdrawalRequests();
+  }, [activeTab]);
+
+  const reviewWithdrawal = async (request: WithdrawalAdminRequest, status: 'approved' | 'rejected') => {
+    const confirmed = window.confirm(status === 'approved'
+      ? `Setujui pembayaran untuk ${request.operatorName} dan tandai ${request.taskCount} task sebagai paid? Pastikan transfer sudah dilakukan.`
+      : `Tolak permintaan pembayaran dari ${request.operatorName}?`);
+    if (!confirmed) return;
+    setProcessingWithdrawalId(request.id);
+    try {
+      const response = await fetch(`/api/admin/withdrawals/${encodeURIComponent(request.id)}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          reviewer: activeAdmin?.username || 'Admin',
+          reviewNote: withdrawalReviewNotes[request.id] || '',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Gagal memverifikasi pembayaran');
+      await loadWithdrawalRequests();
+      await refreshData();
+      showToast(status === 'approved' ? 'Pembayaran disetujui dan task ditandai Paid' : 'Permintaan pembayaran ditolak');
+    } catch (error: any) {
+      showToast(error.message || 'Gagal memverifikasi pembayaran');
+    } finally {
+      setProcessingWithdrawalId(null);
+    }
+  };
 
   // Admin user management states
   const [newAdminUser, setNewAdminUser] = useState('');
@@ -524,6 +630,15 @@ didaftarin> https://cutt.ly/WhatsapLENA
               </button>
 
               <button
+                onClick={() => setActiveTab('withdrawals')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${activeTab === 'withdrawals' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Verifikasi Pembayaran</span>
+                {withdrawalRequests.filter((request) => request.status === 'pending').length > 0 && <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">{withdrawalRequests.filter((request) => request.status === 'pending').length}</span>}
+              </button>
+
+              <button
                 onClick={() => setActiveTab('add_task')}
                 className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                   activeTab === 'add_task'
@@ -582,6 +697,38 @@ didaftarin> https://cutt.ly/WhatsapLENA
               </button>
             </div>
           </div>
+
+          {activeTab === 'withdrawals' && <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3">
+              <div className="min-w-0"><h2 className="text-sm font-bold text-gray-900">Permintaan pembayaran pengerja</h2><p className="text-xs text-gray-500 mt-1">Setujui hanya setelah transfer dilakukan. Tarif saat ini: <b className="text-teal-800">{formatRupiah(withdrawalRate)} per nomor valid.</b> Permintaan lama tetap memakai tarif saat dikirim.</p></div>
+              <button type="button" onClick={() => void loadWithdrawalRequests()} disabled={isLoadingWithdrawals} className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50 shrink-0">{isLoadingWithdrawals ? 'Memuat…' : 'Muat ulang'}</button>
+            </div>
+            <div className="p-4 border-b border-gray-100 bg-gray-50/60 flex flex-col sm:flex-row sm:items-end gap-3">
+              <label className="text-xs font-semibold text-gray-700 space-y-1">Atur tarif per nomor (Rupiah)<input type="number" min="0" max="1000000000" step="1" value={withdrawalRateInput} onChange={(event) => setWithdrawalRateInput(event.target.value)} className="block w-full sm:w-56 rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal outline-none focus:border-teal-600" /></label>
+              <button type="button" onClick={() => void saveWithdrawalRate()} disabled={isSavingWithdrawalRate || isLoadingWithdrawals} className="px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-bold">{isSavingWithdrawalRate ? 'Menyimpan…' : 'Simpan tarif'}</button>
+            </div>
+            {isLoadingWithdrawals && withdrawalRequests.length === 0 ? <p className="p-8 text-center text-xs text-gray-500">Memuat permintaan…</p> : withdrawalRequests.length === 0 ? <p className="p-8 text-center text-xs text-gray-500">Belum ada permintaan pembayaran.</p> : <div className="divide-y divide-gray-200">
+              {withdrawalRequests.map((request) => <article key={request.id} className="p-4 sm:p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-bold text-gray-900">{request.operatorName}</h3><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${request.status === 'pending' ? 'bg-amber-100 text-amber-800' : request.status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{request.status === 'pending' ? 'Menunggu' : request.status === 'approved' ? 'Disetujui / dibayar' : 'Ditolak'}</span><span className="text-[11px] text-gray-400">{request.createdAt}</span></div>
+                    <p className="text-xs text-gray-700"><b>Rekening:</b> {request.bankName} · {request.accountName} · <span className="font-mono font-bold">{request.accountNumber}</span></p>
+                    <p className="text-xs text-teal-800 font-semibold">{request.taskCount} task · {request.totalVerified} nomor valid · {formatRupiah(request.amount)}</p>
+                    <p className="text-[11px] text-gray-500">Tarif permintaan: {formatRupiah(request.ratePerNumber)} / nomor</p>
+                    {request.notes && <p className="text-xs text-gray-500">Catatan pengerja: {request.notes}</p>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">{request.tasks.map((task) => <span key={task.id} className="px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 text-[11px] text-gray-700">{task.code} · {task.store} · {task.verifiedCount} nomor</span>)}</div>
+                {request.status === 'pending' ? <div className="space-y-2">
+                  <textarea value={withdrawalReviewNotes[request.id] || ''} onChange={(event) => setWithdrawalReviewNotes((current) => ({ ...current, [request.id]: event.target.value }))} maxLength={500} rows={2} placeholder="Catatan verifikasi / alasan penolakan (opsional)" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs outline-none focus:border-teal-600" />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => void reviewWithdrawal(request, 'rejected')} disabled={processingWithdrawalId === request.id} className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs font-bold hover:bg-rose-50 disabled:opacity-50">Tolak</button>
+                    <button type="button" onClick={() => void reviewWithdrawal(request, 'approved')} disabled={processingWithdrawalId === request.id} className="px-3 py-2 rounded-lg bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 disabled:opacity-50">{processingWithdrawalId === request.id ? 'Memproses…' : 'Setujui & tandai Paid'}</button>
+                  </div>
+                </div> : <p className="text-[11px] text-gray-500">Ditinjau {request.reviewedAt || '-'} oleh {request.reviewedBy || 'Admin'}{request.reviewNote ? ` · ${request.reviewNote}` : ''}</p>}
+              </article>)}
+            </div>}
+          </section>}
 
           {activeTab === 'whatsapp' && <div className="bg-white border border-green-200 rounded-xl p-4 sm:p-6 space-y-4 max-w-2xl">
             <div>

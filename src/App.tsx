@@ -8,6 +8,7 @@ import { TaskProofView } from './components/views/TaskProofView';
 import { HistoryView } from './components/views/HistoryView';
 import { LeaderboardView } from './components/views/LeaderboardView';
 import { MyReportView } from './components/views/MyReportView';
+import { WithdrawView } from './components/views/WithdrawView';
 import { TelegramView } from './components/views/TelegramView';
 import { AdminPanelView } from './components/views/AdminPanelView';
 import { AdminTaskReviewView } from './components/views/AdminTaskReviewView';
@@ -91,6 +92,11 @@ const AppContent: React.FC = () => {
     // 6. My Report URL route: /work/me
     if (currentPath.startsWith('/work/me')) {
       return <MyReportView />;
+    }
+
+    // Worker withdrawal requests
+    if (currentPath.startsWith('/work/withdraw')) {
+      return <WithdrawView />;
     }
 
     // 7. Telegram URL route: /work/telegram
