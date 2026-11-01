@@ -12,8 +12,8 @@ const app = express();
 const PORT = 3005;
 // OCR is deliberately bounded. A review must finish quickly, but it must never
 // mark a number as present from a partial/ambiguous OCR hit.
-const OCR_MAX_FRAMES_TOTAL = 8;
-const OCR_JOB_TIMEOUT_MS = 28_000;
+const OCR_MAX_FRAMES_TOTAL = 120;
+const OCR_JOB_TIMEOUT_MS = 10 * 60_000;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
@@ -90,7 +90,7 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
     });
     const timeout = setTimeout(() => {
       worker.kill('SIGKILL');
-      reject(new Error('Check Nomor dihentikan setelah 28 detik'));
+      reject(new Error('Check Nomor dihentikan setelah 10 menit'));
     }, OCR_JOB_TIMEOUT_MS);
     let settled = false;
     const finish = (callback: () => void) => {
@@ -855,7 +855,7 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
         const job = numberCheckJobs.get(jobId);
         if (job?.status === 'processing') {
           job.status = 'failed';
-          job.error = 'Pengecekan nomor dihentikan setelah 28 detik. Periksa video secara manual.';
+          job.error = 'Pengecekan nomor dihentikan setelah 10 menit. Periksa video secara manual.';
           job.updatedAt = Date.now();
         }
       }, OCR_JOB_TIMEOUT_MS);

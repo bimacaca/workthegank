@@ -83,7 +83,7 @@ export const AdminTaskReviewView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: NumberCheckResult | null = null;
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 11 * 60_000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 650));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
@@ -94,7 +94,7 @@ export const AdminTaskReviewView: React.FC = () => {
           break;
         }
       }
-      if (!result) throw new Error('Check Nomor melebihi batas 30 detik. Video perlu diperiksa manual.');
+      if (!result) throw new Error('Check Nomor melebihi batas 10 menit. Video perlu diperiksa manual.');
       setNumberCheckResult(result);
       setApprovalNotes(result.note);
     } catch (error: any) {
@@ -206,7 +206,7 @@ export const AdminTaskReviewView: React.FC = () => {
 
             <div className="border border-blue-200 bg-blue-50/60 rounded-lg p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div><p className="text-xs font-bold text-blue-900">Pengecekan nomor video</p><p className="text-[11px] text-blue-700">Pencocokan konservatif selesai maksimal 30 detik.</p></div>
+                <div><p className="text-xs font-bold text-blue-900">Pengecekan nomor video</p><p className="text-[11px] text-blue-700">Memindai hingga 120 frame untuk pencocokan yang lebih teliti.</p></div>
                 <button onClick={() => void checkNumbersInVideo()} disabled={isCheckingNumbers || !selectedTask.proofVideos?.length} className="px-3 py-1.5 rounded-md bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold cursor-pointer">{isCheckingNumbers ? 'Memeriksa video…' : 'Check Nomor'}</button>
               </div>
               {numberCheckResult && <div className="text-xs text-gray-700 space-y-1 border-t border-blue-200 pt-2">
