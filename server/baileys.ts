@@ -94,6 +94,7 @@ export async function startBaileys(): Promise<void> {
         if (code === DisconnectReason.loggedOut) {
           registered = false;
           lastError = 'Sesi WhatsApp telah logout. Pairing ulang diperlukan.';
+          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         } else {
           scheduleReconnect();
         }
@@ -128,7 +129,10 @@ export async function requestPairing(phone: string) {
 }
 
 export const baileysStatus = () => ({
-  connection,
+  // Baileys may emit `open` before its authenticated user is available. Do not
+  // report the website as connected until the live socket has a user identity.
+  connection: connection === 'open' && !socket?.user ? 'connecting' : connection,
+  connected: connection === 'open' && Boolean(socket?.user),
   paired: Boolean(socket?.user || registered),
   user: socket?.user || null,
   pairingCode,

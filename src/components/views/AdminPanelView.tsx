@@ -82,15 +82,21 @@ export const AdminPanelView: React.FC = () => {
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
+  const [whatsappConnected, setWhatsappConnected] = useState(false);
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [whatsappError, setWhatsappError] = useState<string | null>(null);
+  const [whatsappAuthMode, setWhatsappAuthMode] = useState<'qr' | 'pairing'>('qr');
 
   const requestWhatsAppPairing = async () => {
     try {
       const response = await fetch('/api/whatsapp/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: pairingPhone }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Pairing gagal');
-      setPairingCode(data.pairingCode || null); setWhatsappStatus(data.connection || 'connecting'); setWhatsappError(data.error || null);
+      setWhatsappQr(null);
+      setPairingCode(data.pairingCode || null);
+      setWhatsappStatus(data.connection || 'connecting');
+      setWhatsappConnected(Boolean(data.connected));
+      setWhatsappError(data.error || null);
       showToast('Kode pairing berhasil dibuat. Masukkan di WhatsApp Perangkat Tertaut.');
     } catch (error: any) { showToast(error.message || 'Pairing WhatsApp gagal'); }
   };
@@ -100,18 +106,48 @@ export const AdminPanelView: React.FC = () => {
       const response = await fetch('/api/whatsapp/qr', { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'QR gagal dibuat');
-      setWhatsappQr(data.qrCode || null); setWhatsappStatus(data.connection || 'connecting'); setWhatsappError(data.error || null);
+      setPairingCode(null);
+      setWhatsappQr(data.qrCode || null);
+      setWhatsappStatus(data.connection || 'connecting');
+      setWhatsappConnected(Boolean(data.connected));
+      setWhatsappError(data.error || null);
       showToast('QR siap dipindai dari WhatsApp Perangkat Tertaut.');
     } catch (error: any) { showToast(error.message || 'QR WhatsApp gagal dibuat'); }
   };
 
   useEffect(() => {
-    const timer = window.setInterval(async () => {
+    if (activeTab !== 'whatsapp') return;
+    let disposed = false;
+    const refreshStatus = async () => {
       const response = await fetch('/api/whatsapp/status').catch(() => null);
-      if (response?.ok) { const data = await response.json(); setWhatsappStatus(data.connection || 'disconnected'); setWhatsappError(data.error || null); if (data.pairingCode) setPairingCode(data.pairingCode); if (data.qrCode) setWhatsappQr(data.qrCode); if (data.connection === 'open') { setWhatsappQr(null); setPairingCode(null); setWhatsappError(null); } }
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, []);
+      if (!response?.ok) return null;
+      const data = await response.json();
+      if (disposed) return data;
+      const connected = Boolean(data.connected);
+      setWhatsappStatus(data.connection || 'disconnected');
+      setWhatsappConnected(connected);
+      setWhatsappError(connected ? null : data.error || null);
+      setWhatsappQr(connected ? null : data.qrCode || null);
+      setPairingCode(connected ? null : data.pairingCode || null);
+      return data;
+    };
+    const initialize = async () => {
+      const data = await refreshStatus();
+      if (disposed || data?.connected || data?.paired || data?.qrCode) return;
+      const response = await fetch('/api/whatsapp/qr', { method: 'POST' }).catch(() => null);
+      if (!response?.ok || disposed) return;
+      const qrData = await response.json();
+      if (disposed) return;
+      setWhatsappStatus(qrData.connection || 'connecting');
+      setWhatsappConnected(Boolean(qrData.connected));
+      setWhatsappQr(qrData.connected ? null : qrData.qrCode || null);
+      setPairingCode(null);
+      setWhatsappError(qrData.error || null);
+    };
+    void initialize();
+    const timer = window.setInterval(() => { void refreshStatus(); }, 2000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [activeTab]);
 
   const loadProfilePhotos = async (task: Task) => {
     const numbers = (task.numbers || []).map((item) => item.phoneNumber).filter(Boolean);
@@ -544,19 +580,35 @@ didaftarin> https://cutt.ly/WhatsapLENA
           </div>
 
           {activeTab === 'whatsapp' && <div className="bg-white border border-green-200 rounded-xl p-4 sm:p-6 space-y-4 max-w-2xl">
-            <div><div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div><div className="text-[11px] text-gray-500">Status: <span className={whatsappStatus === 'open' ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappStatus}</span></div><div className="text-[11px] text-rose-700 mt-1">Jika status connection closed, server tidak dapat terhubung ke WhatsApp.</div></div>
+            <div>
+              <div className="text-xs font-bold text-gray-900">WhatsApp Baileys</div>
+              <div className="text-[11px] text-gray-500">Status: <span className={whatsappConnected ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{whatsappConnected ? 'Terhubung' : whatsappStatus === 'connecting' ? 'Menghubungkan' : 'Belum terhubung'}</span></div>
+              <div className="text-[11px] text-gray-500 mt-1">Status terhubung hanya ditampilkan setelah sesi WhatsApp aktif terverifikasi oleh server.</div>
+            </div>
             {whatsappError && <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2 break-words">{whatsappError}</div>}
-            <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-900 space-y-1">
-              <p className="font-bold">Hubungkan perangkat WhatsApp</p>
-              <p>Gunakan QR untuk scan dari WhatsApp → Perangkat tertaut, atau masukkan nomor lalu gunakan pairing code.</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-48" />
-              <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold cursor-pointer">Buat Pairing Code</button>
-              <button type="button" onClick={() => void requestWhatsAppQr()} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-xs font-semibold cursor-pointer">Tampilkan QR</button>
-            </div>
-            {pairingCode && <div className="inline-block font-mono font-bold tracking-widest text-green-800 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-sm">Kode: {pairingCode}</div>}
-            {whatsappQr && <div><p className="text-[11px] text-gray-500 mb-1">Scan QR ini dari WhatsApp → Perangkat tertaut</p><img src={whatsappQr} alt="QR WhatsApp Baileys" className="w-40 h-40 rounded-lg border border-gray-200 bg-white p-1" /></div>}
+            {!whatsappConnected && <>
+              <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-900 space-y-1">
+                <p className="font-bold">Hubungkan perangkat WhatsApp</p>
+                <p>{whatsappAuthMode === 'qr' ? 'Pindai QR dari WhatsApp → Perangkat tertaut.' : 'Masukkan nomor WhatsApp untuk menerima pairing code.'}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => { setWhatsappAuthMode('qr'); void requestWhatsAppQr(); }} className={`px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer ${whatsappAuthMode === 'qr' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}>Gunakan QR</button>
+                <button type="button" onClick={() => { setWhatsappAuthMode('pairing'); setWhatsappQr(null); setPairingCode(null); }} className={`px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer ${whatsappAuthMode === 'pairing' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}>Gunakan Pairing Code</button>
+              </div>
+              {whatsappAuthMode === 'qr' && <div>
+                {whatsappQr ? <>
+                  <p className="text-[11px] text-gray-500 mb-1">Pindai QR ini dari WhatsApp → Perangkat tertaut</p>
+                  <img src={whatsappQr} alt="QR WhatsApp Baileys" className="w-56 h-56 rounded-lg border border-gray-200 bg-white p-1" />
+                </> : <p className="text-xs text-gray-500">{whatsappStatus === 'connecting' ? 'Menunggu QR dari WhatsApp…' : 'Menyiapkan QR…'}</p>}
+              </div>}
+              {whatsappAuthMode === 'pairing' && <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input value={pairingPhone} onChange={(e) => setPairingPhone(e.target.value)} placeholder="628xxxxxxxxxx" className="px-3 py-2 border border-gray-200 rounded-lg text-xs w-48" />
+                  <button type="button" onClick={() => void requestWhatsAppPairing()} className="px-3 py-2 rounded-lg bg-green-700 text-white text-xs font-semibold cursor-pointer">Buat Pairing Code</button>
+                </div>
+                {pairingCode && <div className="inline-block font-mono font-bold tracking-widest text-green-800 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-sm">Kode: {pairingCode}</div>}
+              </div>}
+            </>}
           </div>}
 
           {/* TAB 1: TINJAU VIDEO BUKTI */}
