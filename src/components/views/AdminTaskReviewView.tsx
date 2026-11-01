@@ -13,6 +13,7 @@ const formatPhoneForDisplay = (phoneNumber: string) => {
 type NumberCheckResult = {
   checkedVideos: number;
   framesScanned: number;
+  uniqueFramesOcr: number;
   sampledAtOneSecondOrBetter: boolean;
   matched: string[];
   missing: string[];
@@ -40,6 +41,7 @@ export const AdminTaskReviewView: React.FC = () => {
   const [verifiedCount, setVerifiedCount] = useState(0);
   const [playingVideoUrl, setPlayingVideoUrl] = useState<string | null>(null);
   const [isCheckingNumbers, setIsCheckingNumbers] = useState(false);
+  const [numberCheckProgress, setNumberCheckProgress] = useState<{ videoIndex: number; videoCount: number; video: string; framesVisited: number; framesTotal: number; uniqueFramesOcr: number } | null>(null);
   const [numberCheckResult, setNumberCheckResult] = useState<NumberCheckResult | null>(null);
   const [profilePhotos, setProfilePhotos] = useState<Record<string, string | null>>({});
   const [isLoadingProfilePhotos, setIsLoadingProfilePhotos] = useState(false);
@@ -76,6 +78,7 @@ export const AdminTaskReviewView: React.FC = () => {
   const checkNumbersInVideo = async () => {
     if (!selectedTask) return;
     setIsCheckingNumbers(true);
+    setNumberCheckProgress(null);
     setNumberCheckResult(null);
     try {
       const response = await fetch(`/api/tasks/${selectedTask.id}/check-numbers`, { method: 'POST' });
@@ -84,25 +87,27 @@ export const AdminTaskReviewView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: NumberCheckResult | null = null;
-      const deadline = Date.now() + 4 * 60 * 1000;
+      const deadline = Date.now() + 16 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 650));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
         const status = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(status.error || 'Pengecekan gagal');
         if (status.status === 'failed') throw new Error(status.error || 'Pengecekan OCR gagal');
+        if (status.progress) setNumberCheckProgress(status.progress);
         if (status.status === 'completed') {
           result = status.result;
           break;
         }
       }
-      if (!result) throw new Error('Pengecekan memakan waktu terlalu lama. Coba lagi atau tinjau video secara manual.');
+      if (!result) throw new Error('Pengecekan belum selesai dalam 16 menit.');
       setNumberCheckResult(result);
       setApprovalNotes(result.note);
     } catch (error: any) {
       showToast(error.message || 'Pengecekan nomor gagal');
     } finally {
       setIsCheckingNumbers(false);
+      setNumberCheckProgress(null);
     }
   };
 
@@ -208,16 +213,17 @@ export const AdminTaskReviewView: React.FC = () => {
 
             <div className="border border-blue-200 bg-blue-50/60 rounded-lg p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div><p className="text-xs font-bold text-blue-900">Pengecekan nomor video</p><p className="text-[11px] text-blue-700">Memindai hingga 60 frame dan mengulang otomatis sampai selesai.</p></div>
+                <div><p className="text-xs font-bold text-blue-900">Pengecekan nomor video</p><p className="text-[11px] text-blue-700">Memindai seluruh durasi video, empat frame per detik.</p></div>
                 <button onClick={() => void checkNumbersInVideo()} disabled={isCheckingNumbers || !selectedTask.proofVideos?.length} className="px-3 py-1.5 rounded-md bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold cursor-pointer">{isCheckingNumbers ? 'Memeriksa video…' : 'Check Nomor'}</button>
               </div>
+              {isCheckingNumbers && numberCheckProgress && <p className="text-[11px] text-blue-800">Video {numberCheckProgress.videoIndex}/{numberCheckProgress.videoCount}: {numberCheckProgress.framesVisited}/{numberCheckProgress.framesTotal} frame; {numberCheckProgress.uniqueFramesOcr} frame unik dianalisis.</p>}
               {numberCheckResult && <div className="text-xs text-gray-700 space-y-1 border-t border-blue-200 pt-2">
-                <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame dipindai</p>
+                <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame diperiksa · {numberCheckResult.uniqueFramesOcr} frame dianalisis OCR</p>
                 <p className={numberCheckResult.sampledAtOneSecondOrBetter ? 'text-[11px] text-gray-600' : 'text-[11px] font-semibold text-amber-800'}>{numberCheckResult.note}</p>
                 <p><b>{numberCheckResult.matched.length}</b> cocok · <b>{numberCheckResult.missing.length}</b> belum terdeteksi</p>
                 {numberCheckResult.matched.length > 0 && <p className="text-emerald-800 break-all"><b>Nomor cocok:</b> {numberCheckResult.matched.map(formatPhoneForDisplay).join(', ')}</p>}
                 {numberCheckResult.missing.length > 0 && <p className="text-rose-700 break-all">Belum terdeteksi: {numberCheckResult.missing.map(formatPhoneForDisplay).join(', ')}</p>}
-                <p className="text-[11px] text-gray-500">Hasil hanya dinyatakan cocok jika nomor lengkap terbaca; hasil tetap perlu dibandingkan dengan video.</p>
+                <p className="text-[11px] text-gray-500">Pencocokan dilakukan otomatis terhadap nomor lengkap; jumlah frame diperiksa dan dianalisis ditampilkan di atas.</p>
               </div>}
             </div>
 

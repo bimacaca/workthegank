@@ -4,10 +4,12 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import ffmpegPath from 'ffmpeg-static';
+import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_FRAME_BYTES = 12 * 1024 * 1024;
+const FRAMES_PER_SECOND = 4;
 
 function parseDuration(stderr) {
   const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
@@ -23,41 +25,75 @@ async function getDuration(file) {
   }
 }
 
-async function scanVideo(file, maxFrames, worker) {
+async function frameFingerprint(file) {
+  const { data } = await sharp(file).resize(128, 72, { fit: 'fill' }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const tiles = [];
+  for (let tileY = 0; tileY < 9; tileY += 1) {
+    for (let tileX = 0; tileX < 16; tileX += 1) {
+      let total = 0;
+      for (let y = tileY * 8; y < (tileY + 1) * 8; y += 1) {
+        for (let x = tileX * 8; x < (tileX + 1) * 8; x += 1) total += data[y * 128 + x];
+      }
+      tiles.push(total / 64);
+    }
+  }
+  return tiles;
+}
+
+function isMeaningfullyDifferent(previous, current) {
+  if (!previous) return true;
+  return current.some((value, index) => Math.abs(value - previous[index]) >= 4);
+}
+
+async function scanVideo(file, worker, onProgress) {
   const duration = await getDuration(file);
   if (!duration) throw new Error(`Durasi video tidak dapat dibaca: ${path.basename(file)}`);
-  const frameCount = Math.max(1, Math.min(maxFrames, Math.ceil(duration)));
-  const sampleInterval = Math.max(1, duration / frameCount);
+  const frameCount = Math.ceil(duration * FRAMES_PER_SECOND);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'proof-ocr-'));
   try {
     const framePattern = path.join(tempDir, 'frame-%06d.jpg');
     await execFileAsync(ffmpegPath, [
       '-hide_banner', '-loglevel', 'error', '-i', file,
-      '-vf', `fps=1/${sampleInterval.toFixed(3)},scale=min(1440\\,iw):-2`,
+      '-vf', `fps=${FRAMES_PER_SECOND},scale=min(1440\\,iw):-2`,
       '-frames:v', String(frameCount), '-q:v', '3', '-start_number', '1', framePattern,
-    ], { maxBuffer: MAX_FRAME_BYTES, timeout: 90_000 });
+    ], { maxBuffer: MAX_FRAME_BYTES, timeout: 10 * 60_000 });
 
     const frameFiles = (await fs.readdir(tempDir))
       .filter((name) => name.endsWith('.jpg'))
       .sort()
       .map((name) => path.join(tempDir, name));
     const recognized = [];
-    for (const frameFile of frameFiles) {
-      const image = await fs.readFile(frameFile);
-      const { data } = await worker.recognize(image);
-      recognized.push(data.text || '');
+    let previousFingerprint = null;
+    for (let index = 0; index < frameFiles.length; index += 1) {
+      const frameFile = frameFiles[index];
+      const fingerprint = await frameFingerprint(frameFile);
+      if (isMeaningfullyDifferent(previousFingerprint, fingerprint)) {
+        const image = await fs.readFile(frameFile);
+        const { data } = await worker.recognize(image);
+        recognized.push(data.text || '');
+        previousFingerprint = fingerprint;
+      }
+      if ((index + 1) % 40 === 0 || index + 1 === frameFiles.length) {
+        onProgress({
+          video: path.basename(file),
+          framesVisited: index + 1,
+          framesTotal: frameFiles.length,
+          uniqueFramesOcr: recognized.length,
+        });
+      }
     }
     return {
       text: recognized.join('\n'),
-      framesScanned: recognized.length,
-      sampledAtOneSecondOrBetter: sampleInterval <= 1.01,
+      framesScanned: frameFiles.length,
+      uniqueFramesOcr: recognized.length,
+      sampledAtOneSecondOrBetter: true,
     };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
 
-process.on('message', async ({ proofFiles, maxFrames }) => {
+process.on('message', async ({ proofFiles }) => {
   let worker;
   try {
     if (!ffmpegPath) throw new Error('FFmpeg tidak tersedia di server');
@@ -72,16 +108,11 @@ process.on('message', async ({ proofFiles, maxFrames }) => {
     });
     const durations = await Promise.all(proofFiles.map(getDuration));
     if (durations.some((duration) => !duration)) throw new Error('Durasi salah satu video tidak dapat dibaca');
-    const totalDuration = durations.reduce((sum, duration) => sum + duration, 0);
-    const frameBudgets = durations.map((duration) => Math.max(1, Math.floor(maxFrames * duration / totalDuration)));
-    let remainingFrames = Math.max(0, maxFrames - frameBudgets.reduce((sum, count) => sum + count, 0));
-    for (let index = 0; remainingFrames > 0; index = (index + 1) % frameBudgets.length) {
-      frameBudgets[index] += 1;
-      remainingFrames -= 1;
-    }
     const scans = [];
     for (let index = 0; index < proofFiles.length; index += 1) {
-      scans.push(await scanVideo(proofFiles[index], frameBudgets[index], worker));
+      scans.push(await scanVideo(proofFiles[index], worker, (progress) => {
+        process.send?.({ type: 'progress', videoIndex: index + 1, videoCount: proofFiles.length, ...progress });
+      }));
     }
     process.send?.({ type: 'result', scans });
   } catch (error) {

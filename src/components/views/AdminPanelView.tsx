@@ -73,8 +73,9 @@ export const AdminPanelView: React.FC = () => {
   const [verifiedCount, setVerifiedCount] = useState<number>(20);
   const [playingVideoUrl, setPlayingVideoUrl] = useState<string | null>(null);
   const [isCheckingNumbers, setIsCheckingNumbers] = useState(false);
+  const [numberCheckProgress, setNumberCheckProgress] = useState<{ videoIndex: number; videoCount: number; video: string; framesVisited: number; framesTotal: number; uniqueFramesOcr: number } | null>(null);
   const [numberCheckResult, setNumberCheckResult] = useState<{
-    checkedVideos: number; framesScanned: number; sampledAtOneSecondOrBetter: boolean;
+    checkedVideos: number; framesScanned: number; uniqueFramesOcr: number; sampledAtOneSecondOrBetter: boolean;
     matched: string[]; missing: string[]; note: string;
   } | null>(null);
   const [profilePhotos, setProfilePhotos] = useState<Record<string, string | null>>({});
@@ -168,6 +169,7 @@ export const AdminPanelView: React.FC = () => {
 
   const checkNumbersInVideo = async (taskId: string) => {
     setIsCheckingNumbers(true);
+    setNumberCheckProgress(null);
     setNumberCheckResult(null);
     try {
       const response = await fetch(`/api/tasks/${taskId}/check-numbers`, { method: 'POST' });
@@ -185,18 +187,19 @@ export const AdminPanelView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: any;
-      const deadline = Date.now() + 4 * 60 * 1000;
+      const deadline = Date.now() + 16 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
         const status = await parseResponse(statusResponse);
         if (!statusResponse.ok) throw new Error(status.error || 'Pengecekan gagal');
+        if (status.progress) setNumberCheckProgress(status.progress);
         if (status.status === 'completed') {
           result = status.result;
           break;
         }
       }
-      if (!result) throw new Error('Pemeriksaan masih berjalan terlalu lama. Coba periksa kembali nanti.');
+      if (!result) throw new Error('Pemeriksaan belum selesai dalam 16 menit.');
       if (!Array.isArray(result.matched) || !Array.isArray(result.missing)) {
         throw new Error('Format hasil pemeriksaan nomor tidak valid');
       }
@@ -206,6 +209,7 @@ export const AdminPanelView: React.FC = () => {
       showToast(error.message || 'Pengecekan nomor gagal');
     } finally {
       setIsCheckingNumbers(false);
+      setNumberCheckProgress(null);
     }
   };
 
@@ -782,7 +786,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                           </div>
                           {numberCheckResult && (
                             <div className="text-xs text-gray-700 space-y-1 border-t border-blue-200 pt-2">
-                              <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame dipindai</p>
+                              <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame diperiksa · {numberCheckResult.uniqueFramesOcr} frame dianalisis OCR</p>
                               <p className={numberCheckResult.sampledAtOneSecondOrBetter ? 'text-[11px] text-gray-600' : 'text-[11px] font-semibold text-amber-800'}>{numberCheckResult.note}</p>
                               <p><b>{numberCheckResult.matched.length}</b> cocok · <b>{numberCheckResult.missing.length}</b> belum terdeteksi</p>
                               {numberCheckResult.matched.length > 0 && (
@@ -794,6 +798,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                               <p className="text-[11px] text-gray-500">Nomor asing tidak ditampilkan karena OCR dapat menyatukan nomor dengan waktu atau teks lain di layar.</p>
                             </div>
                           )}
+                          {isCheckingNumbers && numberCheckProgress && <p className="text-[11px] text-blue-800">Memindai video {numberCheckProgress.videoIndex}/{numberCheckProgress.videoCount}: {numberCheckProgress.framesVisited}/{numberCheckProgress.framesTotal} frame; {numberCheckProgress.uniqueFramesOcr} frame unik dianalisis.</p>}
                         </div>
 
                         {/* Decision Box */}

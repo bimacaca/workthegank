@@ -10,14 +10,15 @@ import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaile
 
 const app = express();
 const PORT = 3005;
-// Sample broadly across proof videos while keeping OCR work bounded.
-const OCR_MAX_FRAMES_TOTAL = 120;
-const OCR_JOB_TIMEOUT_MS = 180_000;
+// The worker scans the complete duration; only visually unchanged adjacent frames skip OCR.
+const OCR_JOB_TIMEOUT_MS = 15 * 60_000;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
+  progress?: { videoIndex: number; videoCount: number; video: string; framesVisited: number; framesTotal: number; uniqueFramesOcr: number };
   result?: {
     checkedVideos: number;
     framesScanned: number;
+    uniqueFramesOcr: number;
     sampledAtOneSecondOrBetter: boolean;
     matched: string[];
     missing: string[];
@@ -82,7 +83,10 @@ const normalizePhone = (value: string) => {
   return digits;
 };
 
-function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ text: string; framesScanned: number; sampledAtOneSecondOrBetter: boolean }[]> {
+function scanVideosInWorker(
+  proofFiles: string[],
+  onProgress: (progress: { videoIndex: number; videoCount: number; video: string; framesVisited: number; framesTotal: number; uniqueFramesOcr: number }) => void,
+): Promise<{ text: string; framesScanned: number; uniqueFramesOcr: number; sampledAtOneSecondOrBetter: boolean }[]> {
   return new Promise((resolve, reject) => {
     const worker = fork(path.resolve(process.cwd(), 'server/ocr-worker.mjs'), [], {
       execArgv: [],
@@ -90,7 +94,7 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
     });
     const timeout = setTimeout(() => {
       worker.kill('SIGKILL');
-      reject(new Error('Pengecekan dihentikan setelah batas waktu 3 menit'));
+      reject(new Error('Pengecekan dihentikan setelah batas waktu 15 menit'));
     }, OCR_JOB_TIMEOUT_MS);
     let settled = false;
     const finish = (callback: () => void) => {
@@ -103,7 +107,28 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
     worker.once('exit', (code) => {
       if (!settled) finish(() => reject(new Error(`Worker OCR berhenti sebelum selesai (kode ${code ?? 'tidak diketahui'})`)));
     });
-    worker.on('message', (message: { type: string; scans?: { text: string; framesScanned: number; sampledAtOneSecondOrBetter: boolean }[]; error?: string }) => {
+    worker.on('message', (message: {
+      type: string;
+      scans?: { text: string; framesScanned: number; uniqueFramesOcr: number; sampledAtOneSecondOrBetter: boolean }[];
+      error?: string;
+      videoIndex?: number;
+      videoCount?: number;
+      video?: string;
+      framesVisited?: number;
+      framesTotal?: number;
+      uniqueFramesOcr?: number;
+    }) => {
+      if (message.type === 'progress') {
+        onProgress({
+          videoIndex: message.videoIndex || 0,
+          videoCount: message.videoCount || 0,
+          video: message.video || '',
+          framesVisited: message.framesVisited || 0,
+          framesTotal: message.framesTotal || 0,
+          uniqueFramesOcr: message.uniqueFramesOcr || 0,
+        });
+        return;
+      }
       if (message.type === 'result' && message.scans) {
         finish(() => {
           worker.disconnect();
@@ -113,7 +138,7 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
         finish(() => reject(new Error(message.error || 'Worker OCR gagal')));
       }
     });
-    worker.send({ proofFiles, maxFrames }, (error) => {
+    worker.send({ proofFiles }, (error) => {
       if (error) finish(() => reject(error));
     });
   });
@@ -852,9 +877,15 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const videoScans = await scanVideosInWorker(proofFiles, OCR_MAX_FRAMES_TOTAL);
+        const job = numberCheckJobs.get(jobId);
+        const videoScans = await scanVideosInWorker(proofFiles, (progress) => {
+          if (job) {
+            job.progress = progress;
+            job.updatedAt = Date.now();
+          }
+        });
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
-        const sampledAtOneSecondOrBetter = videoScans.every((scan) => scan.sampledAtOneSecondOrBetter);
+        const uniqueFramesOcr = videoScans.reduce((total, scan) => total + scan.uniqueFramesOcr, 0);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
         }));
@@ -864,18 +895,16 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
         const missing = taskNumbers.filter((number: any) =>
           !videoScans.some((scan) => phoneAppearsInOcr(scan.text, number.phoneNumber))
         );
-        const job = numberCheckJobs.get(jobId);
         if (job) {
           job.status = 'completed';
           job.result = {
             checkedVideos: proofFiles.length,
             framesScanned,
-            sampledAtOneSecondOrBetter,
+            uniqueFramesOcr,
+            sampledAtOneSecondOrBetter: true,
             matched: matched.map((number: any) => number.phoneNumber),
             missing: missing.map((number: any) => number.phoneNumber),
-            note: sampledAtOneSecondOrBetter
-              ? `Pemeriksaan menyapu seluruh durasi dengan sampling sekitar 1 frame/detik (${framesScanned} frame). Hasil cocok wajib terbaca lengkap; nomor yang belum terdeteksi tetap perlu verifikasi video manual.`
-              : `Pemeriksaan memakai sampling renggang karena batas maksimum ${OCR_MAX_FRAMES_TOTAL} frame tercapai (${framesScanned} frame). Nomor yang belum terdeteksi tidak dapat dianggap tidak ada dan perlu verifikasi video manual.`,
+            note: `Seluruh video dipindai dengan sampling 4 frame/detik: ${framesScanned} frame dikunjungi dan ${uniqueFramesOcr} frame visual unik diproses OCR. Pencocokan nomor memerlukan semua digit terbaca lengkap.`,
           };
           job.updatedAt = Date.now();
         }
@@ -897,7 +926,7 @@ app.get('/api/number-check-jobs/:jobId', (req, res) => {
   const job = numberCheckJobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Pekerjaan pemeriksaan tidak ditemukan atau sudah kedaluwarsa' });
   if (job.status === 'failed') return res.status(500).json({ status: job.status, error: job.error });
-  res.json({ status: job.status, ...(job.result ? { result: job.result } : {}) });
+  res.json({ status: job.status, ...(job.progress ? { progress: job.progress } : {}), ...(job.result ? { result: job.result } : {}) });
 });
 
 // 11. Upload Video Proof (Real Multer Upload)
