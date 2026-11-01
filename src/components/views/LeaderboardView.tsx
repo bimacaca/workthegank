@@ -1,36 +1,150 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
-import { Calendar, ChevronRight, Trophy } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+
+type Period = 'Harian' | 'Mingguan' | 'Bulanan' | 'Rentang tanggal';
+type RankedOperator = {
+  id: string;
+  name: string;
+  totalCompletedTasks: number;
+  totalCompletedNumbers: number;
+  totalFailedNumbers: number;
+};
+
+const formatLocalDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDate = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+};
+
+const shiftDate = (value: string, days: number) => {
+  const date = parseLocalDate(value);
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
+};
+
+const shiftMonth = (value: string, months: number) => {
+  const date = parseLocalDate(value);
+  const targetDay = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + months);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(targetDay, lastDay));
+  return formatLocalDate(date);
+};
 
 export const LeaderboardView: React.FC = () => {
-  const { dailyStat, operators, refreshData } = useApp();
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [activeTab, setActiveTab] = useState<'Harian' | 'Mingguan' | 'Bulanan' | 'Rentang tanggal'>('Harian');
+  const { dailyStat } = useApp();
+  const today = formatLocalDate(new Date());
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [rangeStart, setRangeStart] = useState(today);
+  const [rangeEnd, setRangeEnd] = useState(today);
+  const [activeTab, setActiveTab] = useState<Period>('Harian');
+  const [periodOperators, setPeriodOperators] = useState<RankedOperator[]>([]);
+  const [periodStats, setPeriodStats] = useState(dailyStat);
+  const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
+  const [periodError, setPeriodError] = useState<string | null>(null);
   const [hoveredHour, setHoveredHour] = useState<number | null>(null);
-  useEffect(() => { void refreshData(selectedDate); }, [selectedDate, refreshData]);
 
-  const rankedOperators = [...operators].sort((a, b) => {
-    return (b.totalCompletedNumbers || 0) - (a.totalCompletedNumbers || 0);
-  });
-  // Keep the headline total consistent with the ranking table. Rejected tasks
-  // are already excluded by the server's operator totals.
-  const totalCompletedNumbers = operators.reduce(
-    (sum, operator) => sum + Number(operator.totalCompletedNumbers || operator.total_completed_numbers || 0),
-    0
-  );
-  const totalFailedNumbers = operators.reduce(
-    (sum, operator) => sum + Number(operator.totalFailedNumbers || operator.total_failed_numbers || 0),
-    0
-  );
+  const period = useMemo(() => {
+    if (activeTab === 'Mingguan') {
+      const start = parseLocalDate(selectedDate);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      const startDate = formatLocalDate(start);
+      return { startDate, endDate: shiftDate(startDate, 6) };
+    }
+    if (activeTab === 'Bulanan') {
+      const date = parseLocalDate(selectedDate);
+      const startDate = formatLocalDate(new Date(date.getFullYear(), date.getMonth(), 1, 12));
+      const endDate = formatLocalDate(new Date(date.getFullYear(), date.getMonth() + 1, 0, 12));
+      return { startDate, endDate };
+    }
+    if (activeTab === 'Rentang tanggal') {
+      return rangeStart <= rangeEnd
+        ? { startDate: rangeStart, endDate: rangeEnd }
+        : { startDate: rangeEnd, endDate: rangeStart };
+    }
+    return { startDate: selectedDate, endDate: selectedDate };
+  }, [activeTab, selectedDate, rangeStart, rangeEnd]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadPeriod = async () => {
+      setIsLoadingPeriod(true);
+      setPeriodError(null);
+      try {
+        const query = new URLSearchParams(period);
+        const [response, statsResponse] = await Promise.all([
+          fetch(`/api/leaderboard?${query}`, { signal: controller.signal }),
+          fetch(`/api/stats?date=${encodeURIComponent(period.endDate)}`, { signal: controller.signal }),
+        ]);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Gagal memuat papan peringkat');
+        setPeriodOperators(data);
+        if (statsResponse.ok) {
+          const stats = await statsResponse.json();
+          setPeriodStats((current) => ({
+            ...current,
+            ...stats,
+            hourlyCompleted: stats.hourlyCompleted || current.hourlyCompleted,
+            hourlyFailed: stats.hourlyFailed || current.hourlyFailed,
+          }));
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setPeriodError(error instanceof Error ? error.message : 'Gagal memuat papan peringkat');
+        setPeriodOperators([]);
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingPeriod(false);
+      }
+    };
+    void loadPeriod();
+    return () => controller.abort();
+  }, [period]);
+
+  const rankedOperators = [...periodOperators].sort((a, b) => b.totalCompletedNumbers - a.totalCompletedNumbers);
+  const totalCompletedNumbers = periodOperators.reduce((sum, operator) => sum + operator.totalCompletedNumbers, 0);
+  const totalFailedNumbers = periodOperators.reduce((sum, operator) => sum + operator.totalFailedNumbers, 0);
+  const totalCompletedTasks = periodOperators.reduce((sum, operator) => sum + operator.totalCompletedTasks, 0);
+  const canGoNext = period.endDate < today;
+
+  const movePeriod = (direction: -1 | 1) => {
+    if (direction > 0 && !canGoNext) return;
+    if (activeTab === 'Harian') setSelectedDate((date) => shiftDate(date, direction));
+    else if (activeTab === 'Mingguan') setSelectedDate((date) => shiftDate(date, direction * 7));
+    else if (activeTab === 'Bulanan') setSelectedDate((date) => shiftMonth(date, direction));
+    else {
+      const span = Math.max(0, Math.round((parseLocalDate(period.endDate).getTime() - parseLocalDate(period.startDate).getTime()) / 86_400_000));
+      const nextStart = shiftDate(period.startDate, direction);
+      const nextEnd = shiftDate(nextStart, span);
+      if (direction < 0 || nextEnd <= today) {
+        setRangeStart(nextStart);
+        setRangeEnd(nextEnd);
+      } else {
+        setRangeEnd(today);
+        setRangeStart(shiftDate(today, -span));
+      }
+    }
+  };
+
+  const periodLabel = activeTab === 'Harian'
+    ? period.startDate
+    : `${period.startDate} – ${period.endDate}`;
 
   // Set the graph scale from the largest stacked bar (completed + failed),
   // rounded up to an easy-to-read value rather than a fixed 2,000.
   const highestHourlyTotal = Math.max(
     0,
-    ...dailyStat.hourlyCompleted.map(
-      (completed, hour) => completed + (dailyStat.hourlyFailed[hour] || 0)
+    ...periodStats.hourlyCompleted.map(
+      (completed, hour) => completed + (periodStats.hourlyFailed[hour] || 0)
     )
   );
   const chartMax = (() => {
@@ -75,31 +189,40 @@ export const LeaderboardView: React.FC = () => {
 
             <div className="text-xs text-gray-400 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-              <span>Data terbaru</span>
+                <span>{isLoadingPeriod ? 'Memuat data' : periodError ? 'Gagal memuat' : 'Data periode'}</span>
             </div>
           </div>
 
-          <p className="text-xs text-gray-500">
-            Periode ditutup pukul 00.00 WIB. Pekerjaan setelah tengah malam masuk ke periode berikutnya.
-          </p>
+              <p className="text-xs text-gray-500">Periode: {periodLabel}. Waktu pembagian periode mengikuti tanggal lokal perangkat.</p>
 
           {/* Daily Card Metrics */}
           <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 shadow-xs space-y-4 sm:space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-bold text-gray-900">Hari ini</h2>
-                <span className="text-xs text-gray-400">{dailyStat.date}</span>
+                <h2 className="text-sm font-bold text-gray-900">{activeTab}</h2>
+                <span className="text-xs text-gray-400">{periodLabel}</span>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
+              <div className="flex flex-wrap items-center gap-2">
+                {activeTab === 'Rentang tanggal' ? <>
+                  <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 text-xs text-gray-700">
+                    <Calendar className="w-3.5 h-3.5 text-gray-500" /><span>Dari</span>
+                    <input type="date" value={rangeStart} max={today} onChange={(event) => { const value = event.target.value; if (value) { setRangeStart(value); if (value > rangeEnd) setRangeEnd(value); } }} className="bg-transparent outline-none" />
+                  </label>
+                  <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 text-xs text-gray-700">
+                    <span>Sampai</span>
+                    <input type="date" value={rangeEnd} max={today} onChange={(event) => { if (event.target.value) setRangeEnd(event.target.value); }} className="bg-transparent outline-none" />
+                  </label>
+                </> : <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 text-xs text-gray-700">
                   <Calendar className="w-3.5 h-3.5 text-gray-500" />
-                  <span>Pilih tanggal</span>
-                </button>
+                  <input type="date" value={selectedDate} max={today} onChange={(event) => { if (event.target.value) setSelectedDate(event.target.value); }} className="bg-transparent outline-none" />
+                </label>}
 
-                <button onClick={() => { const d = new Date(`${selectedDate}T12:00:00`); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().slice(0, 10)); }} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
-                  <span>Sebelumnya</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                <button onClick={() => movePeriod(-1)} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
+                  <ChevronLeft className="w-3.5 h-3.5 text-gray-400" /><span>Sebelumnya</span>
+                </button>
+                <button onClick={() => movePeriod(1)} disabled={!canGoNext} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span>Berikutnya</span><ChevronRight className="w-3.5 h-3.5 text-gray-400" />
                 </button>
               </div>
             </div>
@@ -120,7 +243,7 @@ export const LeaderboardView: React.FC = () => {
                   Task dikirim
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-gray-900">
-                  {dailyStat.submittedTasks.toLocaleString()}
+                  {totalCompletedTasks.toLocaleString()}
                 </div>
               </div>
 
@@ -129,7 +252,7 @@ export const LeaderboardView: React.FC = () => {
                   Nama aktif
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-gray-900">
-                  {operators.length}
+                  {periodOperators.filter((operator) => operator.totalCompletedTasks > 0).length}
                 </div>
               </div>
 
@@ -149,7 +272,7 @@ export const LeaderboardView: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900">Tren</h3>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">
-                puncak {dailyStat.peakHourly}
+                puncak {periodStats.peakHourly}
               </span>
             </div>
 
@@ -168,8 +291,8 @@ export const LeaderboardView: React.FC = () => {
                 </div>
 
                 {/* Bars */}
-                {dailyStat.hourlyCompleted.map((completed, hour) => {
-                  const failed = dailyStat.hourlyFailed[hour] || 0;
+                {periodStats.hourlyCompleted.map((completed, hour) => {
+                  const failed = periodStats.hourlyFailed[hour] || 0;
                   const completedPercent = (completed / chartMax) * 100;
                   const failedPercent = (failed / chartMax) * 100;
 
@@ -239,7 +362,11 @@ export const LeaderboardView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {rankedOperators.length > 0 ? (
+                  {periodError ? (
+                    <tr><td colSpan={5} className="px-5 py-8 text-center text-rose-700 text-xs">{periodError}</td></tr>
+                  ) : isLoadingPeriod ? (
+                    <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400 text-xs">Memuat peringkat periode…</td></tr>
+                  ) : rankedOperators.length > 0 ? (
                     rankedOperators.map((op, idx) => {
                       const total = (op.totalCompletedNumbers || 0) + (op.totalFailedNumbers || 0);
                       const successRate = total > 0 ? (((op.totalCompletedNumbers || 0) / total) * 100).toFixed(1) : '100.0';

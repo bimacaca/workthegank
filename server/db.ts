@@ -6,33 +6,48 @@ const DB_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.resolve(DB_DIR, 'database.sqlite');
 
 let db: Database | null = null;
+let dbInitialization: Promise<Database> | null = null;
 
 export async function getDb(): Promise<Database> {
   if (db) return db;
+  if (dbInitialization) return dbInitialization;
 
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
+  dbInitialization = (async () => {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
 
-  const SQL = await initSqlJs();
+    const SQL = await initSqlJs();
+    const database = fs.existsSync(DB_FILE)
+      ? new SQL.Database(fs.readFileSync(DB_FILE))
+      : new SQL.Database();
 
-  if (fs.existsSync(DB_FILE)) {
-    const fileBuffer = fs.readFileSync(DB_FILE);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
+    initTables(database);
+    database.run('PRAGMA foreign_keys = ON');
+    db = database;
+    saveDb();
+    return database;
+  })().catch((error) => {
+    dbInitialization = null;
+    throw error;
+  });
 
-  initTables(db);
-  saveDb();
-  return db;
+  return dbInitialization;
 }
 
 export function saveDb(): void {
   if (!db) return;
   const data = db.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_FILE, buffer);
+  const tempFile = `${DB_FILE}.${process.pid}.tmp`;
+  const fd = fs.openSync(tempFile, 'w');
+  try {
+    fs.writeFileSync(fd, buffer);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tempFile, DB_FILE);
 }
 
 function initTables(database: Database) {

@@ -494,6 +494,48 @@ app.get('/api/operators', async (_req, res) => {
   }
 });
 
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : '';
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : '';
+    const isValidDate = (value: string) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const date = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    };
+    if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+      return res.status(400).json({ error: 'Rentang tanggal papan peringkat tidak valid' });
+    }
+
+    const rows = await queryAll(`
+      SELECT
+        o.id,
+        o.name,
+        COUNT(DISTINCT t.id) AS total_completed_tasks,
+        COALESCE(SUM(CASE WHEN n.status = 'done' THEN 1 ELSE 0 END), 0) AS total_completed_numbers,
+        COALESCE(SUM(CASE WHEN n.status = 'failed' THEN 1 ELSE 0 END), 0) AS total_failed_numbers
+      FROM operators o
+      LEFT JOIN tasks t ON LOWER(t.operator_name) = LOWER(o.name)
+        AND t.status IN ('submitted', 'approved')
+        AND datetime(COALESCE(t.completed_at, t.submitted_at, t.created_at)) >= datetime(?, '-7 hours')
+        AND datetime(COALESCE(t.completed_at, t.submitted_at, t.created_at)) < datetime(?, '+1 day', '-7 hours')
+      LEFT JOIN task_numbers n ON n.task_id = t.id
+      GROUP BY o.id, o.name
+      ORDER BY total_completed_numbers DESC, total_completed_tasks DESC, LOWER(o.name) ASC
+    `, [startDate, endDate]);
+
+    res.json(rows.map((operator) => ({
+      id: operator.id,
+      name: operator.name,
+      totalCompletedTasks: Number(operator.total_completed_tasks || 0),
+      totalCompletedNumbers: Number(operator.total_completed_numbers || 0),
+      totalFailedNumbers: Number(operator.total_failed_numbers || 0),
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Create operator
 app.post('/api/operators', async (req, res) => {
   try {
@@ -1063,7 +1105,11 @@ app.get('/api/stats', async (req, res) => {
       "SELECT COUNT(*) as c FROM task_numbers n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'failed' AND t.status IN ('submitted', 'approved')"
     );
     const submittedTasksRow = await queryOne(
-      "SELECT COUNT(*) as c FROM tasks WHERE status IN ('submitted', 'approved', 'rejected') AND date(COALESCE(completed_at, created_at)) = ?", [requestedDate]
+      `SELECT COUNT(*) as c FROM tasks
+       WHERE status IN ('submitted', 'approved', 'rejected')
+         AND datetime(COALESCE(completed_at, created_at)) >= datetime(?, '-7 hours')
+         AND datetime(COALESCE(completed_at, created_at)) < datetime(?, '+1 day', '-7 hours')`,
+      [requestedDate, requestedDate]
     );
     const activeWorkersRow = await queryOne(
       'SELECT COUNT(*) as c FROM operators WHERE is_active = 1'
@@ -1076,13 +1122,16 @@ app.get('/api/stats', async (req, res) => {
     );
     const hourlyRows = await queryAll(
       `SELECT
-         CAST(strftime('%H', updated_at) AS INTEGER) AS hour,
+         CAST(strftime('%H', updated_at, '+7 hours') AS INTEGER) AS hour,
          SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
        FROM task_numbers
        JOIN tasks t ON t.id = task_numbers.task_id
-       WHERE updated_at IS NOT NULL AND t.status IN ('submitted', 'approved') AND date(COALESCE(t.completed_at, updated_at)) = ?
-       GROUP BY hour`, [requestedDate]
+       WHERE updated_at IS NOT NULL
+         AND t.status IN ('submitted', 'approved')
+         AND datetime(updated_at) >= datetime(?, '-7 hours')
+         AND datetime(updated_at) < datetime(?, '+1 day', '-7 hours')
+       GROUP BY hour`, [requestedDate, requestedDate]
     );
     const hourlyCompleted = Array(24).fill(0);
     const hourlyFailed = Array(24).fill(0);
