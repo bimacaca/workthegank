@@ -119,6 +119,19 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
   });
 }
 
+async function scanVideosUntilComplete(proofFiles: string[], maxFrames: number) {
+  // A slow OCR worker is restarted and retried instead of failing the review.
+  // This keeps checking until a complete scan is available.
+  while (true) {
+    try {
+      return await scanVideosInWorker(proofFiles, maxFrames);
+    } catch (error) {
+      console.warn('[OCR] Worker gagal, mencoba lagi:', (error as Error)?.message || error);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+}
+
 function phoneAppearsInOcr(recognizedText: string, phoneNumber: string): boolean {
   const digits = normalizePhone(phoneNumber);
   if (digits.length < 7) return false;
@@ -846,22 +859,14 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
     const jobId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     numberCheckJobs.set(jobId, { status: 'processing', updatedAt: Date.now() });
     for (const [oldJobId, job] of numberCheckJobs) {
-      if (Date.now() - job.updatedAt > 30 * 60 * 1000) numberCheckJobs.delete(oldJobId);
+      if (job.status !== 'processing' && Date.now() - job.updatedAt > 30 * 60 * 1000) numberCheckJobs.delete(oldJobId);
     }
     res.status(202).json({ jobId, status: 'processing' });
 
     setImmediate(async () => {
-      const hardTimeout = setTimeout(() => {
-        const job = numberCheckJobs.get(jobId);
-        if (job?.status === 'processing') {
-          job.status = 'failed';
-          job.error = 'Pengecekan nomor dihentikan setelah 1 menit. Periksa video secara manual.';
-          job.updatedAt = Date.now();
-        }
-      }, OCR_JOB_TIMEOUT_MS);
       try {
         const framesPerVideo = Math.max(2, Math.floor(OCR_MAX_FRAMES_TOTAL / proofFiles.length));
-        const videoScans = await scanVideosInWorker(proofFiles, framesPerVideo);
+        const videoScans = await scanVideosUntilComplete(proofFiles, framesPerVideo);
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
@@ -887,12 +892,10 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
       } catch (err: any) {
         const job = numberCheckJobs.get(jobId);
         if (job) {
-          job.status = 'failed';
-          job.error = `Pengecekan nomor gagal: ${err.message}`;
+          job.status = 'processing';
+          job.error = `Pengecekan masih diulang: ${err.message}`;
           job.updatedAt = Date.now();
         }
-      } finally {
-        clearTimeout(hardTimeout);
       }
     });
   } catch (err: any) {
