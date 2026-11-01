@@ -176,6 +176,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Fetch current data from the service API
+  const activeOperatorName = activeOperator?.name;
   const refreshData = useCallback(async (date?: string) => {
     try {
       setIsLoading(true);
@@ -196,10 +197,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Sync the active operator only while the session still has one.
         // A pending refresh may finish after logout; in that case the storage
         // entry has been removed and must not restore the previous selection.
-        if (activeOperator && localStorage.getItem(STORAGE_KEYS.ACTIVE_OP)) {
-          const matched = opsData.find((o: Operator) => o.name === activeOperator.name);
+        if (activeOperatorName && localStorage.getItem(STORAGE_KEYS.ACTIVE_OP)) {
+          const matched = opsData.find((o: Operator) => o.name === activeOperatorName);
           if (matched) {
-            setActiveOperator(matched);
+            setActiveOperator((current) => {
+              if (
+                current &&
+                current.name === matched.name &&
+                current.totalCompletedTasks === matched.totalCompletedTasks &&
+                current.totalCompletedNumbers === matched.totalCompletedNumbers &&
+                current.totalFailedNumbers === matched.totalFailedNumbers &&
+                current.isActive === matched.isActive &&
+                current.hasPin === matched.hasPin
+              ) return current;
+              return matched;
+            });
             localStorage.setItem(STORAGE_KEYS.ACTIVE_OP, JSON.stringify(matched));
           }
         }
@@ -226,7 +238,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       setIsLoading(false);
     }
-  }, [activeOperator]);
+  }, [activeOperatorName]);
 
   // Initial load
   useEffect(() => {
