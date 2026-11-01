@@ -11,13 +11,14 @@ import { baileysStatus, checkProfilePhoto, requestPairing, requestQr, startBaile
 const app = express();
 const PORT = 3005;
 // Sample broadly across proof videos while keeping OCR work bounded.
-const OCR_MAX_FRAMES_TOTAL = 24;
-const OCR_JOB_TIMEOUT_MS = 90_000;
+const OCR_MAX_FRAMES_TOTAL = 120;
+const OCR_JOB_TIMEOUT_MS = 180_000;
 const numberCheckJobs = new Map<string, {
   status: 'processing' | 'completed' | 'failed';
   result?: {
     checkedVideos: number;
     framesScanned: number;
+    sampledAtOneSecondOrBetter: boolean;
     matched: string[];
     missing: string[];
     note: string;
@@ -81,7 +82,7 @@ const normalizePhone = (value: string) => {
   return digits;
 };
 
-function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ text: string; framesScanned: number }[]> {
+function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ text: string; framesScanned: number; sampledAtOneSecondOrBetter: boolean }[]> {
   return new Promise((resolve, reject) => {
     const worker = fork(path.resolve(process.cwd(), 'server/ocr-worker.mjs'), [], {
       execArgv: [],
@@ -89,7 +90,7 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
     });
     const timeout = setTimeout(() => {
       worker.kill('SIGKILL');
-      reject(new Error('Check Nomor dihentikan setelah 1 menit'));
+      reject(new Error('Pengecekan dihentikan setelah batas waktu 3 menit'));
     }, OCR_JOB_TIMEOUT_MS);
     let settled = false;
     const finish = (callback: () => void) => {
@@ -102,7 +103,7 @@ function scanVideosInWorker(proofFiles: string[], maxFrames: number): Promise<{ 
     worker.once('exit', (code) => {
       if (!settled) finish(() => reject(new Error(`Worker OCR berhenti sebelum selesai (kode ${code ?? 'tidak diketahui'})`)));
     });
-    worker.on('message', (message: { type: string; scans?: { text: string; framesScanned: number }[]; error?: string }) => {
+    worker.on('message', (message: { type: string; scans?: { text: string; framesScanned: number; sampledAtOneSecondOrBetter: boolean }[]; error?: string }) => {
       if (message.type === 'result' && message.scans) {
         finish(() => {
           worker.disconnect();
@@ -851,9 +852,9 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const framesPerVideo = Math.max(2, Math.floor(OCR_MAX_FRAMES_TOTAL / proofFiles.length));
-        const videoScans = await scanVideosInWorker(proofFiles, framesPerVideo);
+        const videoScans = await scanVideosInWorker(proofFiles, OCR_MAX_FRAMES_TOTAL);
         const framesScanned = videoScans.reduce((total, scan) => total + scan.framesScanned, 0);
+        const sampledAtOneSecondOrBetter = videoScans.every((scan) => scan.sampledAtOneSecondOrBetter);
         const taskNumbers = task.numbers.map((number: any) => ({
           phoneNumber: normalizePhone(number.phoneNumber),
         }));
@@ -869,9 +870,12 @@ app.post('/api/tasks/:id/check-numbers', async (req, res) => {
           job.result = {
             checkedVideos: proofFiles.length,
             framesScanned,
+            sampledAtOneSecondOrBetter,
             matched: matched.map((number: any) => number.phoneNumber),
             missing: missing.map((number: any) => number.phoneNumber),
-            note: `Pencocokan ketat selesai: ${matched.length}/${taskNumbers.length} nomor terbaca lengkap pada ${framesScanned} frame. Nomor hanya dianggap cocok jika seluruh digit terbaca tanpa tambahan digit; hasil yang tidak terbaca harus dikonfirmasi dari video.`,
+            note: sampledAtOneSecondOrBetter
+              ? `Pemeriksaan menyapu seluruh durasi dengan sampling sekitar 1 frame/detik (${framesScanned} frame). Hasil cocok wajib terbaca lengkap; nomor yang belum terdeteksi tetap perlu verifikasi video manual.`
+              : `Pemeriksaan memakai sampling renggang karena batas maksimum ${OCR_MAX_FRAMES_TOTAL} frame tercapai (${framesScanned} frame). Nomor yang belum terdeteksi tidak dapat dianggap tidak ada dan perlu verifikasi video manual.`,
           };
           job.updatedAt = Date.now();
         }

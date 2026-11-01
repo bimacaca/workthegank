@@ -13,6 +13,7 @@ const formatPhoneForDisplay = (phoneNumber: string) => {
 type NumberCheckResult = {
   checkedVideos: number;
   framesScanned: number;
+  sampledAtOneSecondOrBetter: boolean;
   matched: string[];
   missing: string[];
   note: string;
@@ -83,7 +84,7 @@ export const AdminTaskReviewView: React.FC = () => {
       if (!started.jobId) throw new Error('Server tidak mengembalikan ID pemeriksaan');
 
       let result: NumberCheckResult | null = null;
-      const deadline = Date.now() + 2 * 60 * 1000;
+      const deadline = Date.now() + 4 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 650));
         const statusResponse = await fetch(`/api/number-check-jobs/${started.jobId}`);
@@ -212,6 +213,7 @@ export const AdminTaskReviewView: React.FC = () => {
               </div>
               {numberCheckResult && <div className="text-xs text-gray-700 space-y-1 border-t border-blue-200 pt-2">
                 <p className="text-[11px] text-gray-500">{numberCheckResult.checkedVideos} video · {numberCheckResult.framesScanned} frame dipindai</p>
+                <p className={numberCheckResult.sampledAtOneSecondOrBetter ? 'text-[11px] text-gray-600' : 'text-[11px] font-semibold text-amber-800'}>{numberCheckResult.note}</p>
                 <p><b>{numberCheckResult.matched.length}</b> cocok · <b>{numberCheckResult.missing.length}</b> belum terdeteksi</p>
                 {numberCheckResult.matched.length > 0 && <p className="text-emerald-800 break-all"><b>Nomor cocok:</b> {numberCheckResult.matched.map(formatPhoneForDisplay).join(', ')}</p>}
                 {numberCheckResult.missing.length > 0 && <p className="text-rose-700 break-all">Belum terdeteksi: {numberCheckResult.missing.map(formatPhoneForDisplay).join(', ')}</p>}
