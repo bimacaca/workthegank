@@ -189,9 +189,34 @@ async function execute(sql: string, params: any[] = []): Promise<void> {
   saveDb();
 }
 
+async function getAuthSessionVersion(): Promise<number> {
+  const setting = await queryOne(
+    "SELECT setting_value FROM app_settings WHERE setting_key = 'auth_session_version'"
+  );
+  return Number(setting?.setting_value || 1);
+}
+
+async function invalidateAllAuthSessions(): Promise<number> {
+  const currentVersion = await getAuthSessionVersion();
+  const nextVersion = currentVersion + 1;
+  await execute(
+    "UPDATE app_settings SET setting_value = ? WHERE setting_key = 'auth_session_version'",
+    [String(nextVersion)]
+  );
+  return nextVersion;
+}
+
 // ==========================================
 // API ROUTES: AUTHENTICATION & ADMIN MANAGEMENT
 // ==========================================
+
+app.get('/api/auth/session-state', async (_req, res) => {
+  try {
+    res.json({ sessionVersion: await getAuthSessionVersion() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Unified Auth Login (Worker & Admin)
 app.post('/api/auth/login', async (req, res) => {
@@ -226,6 +251,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.json({
         success: true,
         role: 'admin',
+        sessionVersion: await getAuthSessionVersion(),
         user: {
           id: admin.id,
           username: admin.username,
@@ -252,6 +278,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.json({
         success: true,
         role: 'worker',
+        sessionVersion: await getAuthSessionVersion(),
         user: {
           id: worker.id,
           username: worker.username,
@@ -272,6 +299,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.json({
         success: true,
         role: 'worker',
+        sessionVersion: await getAuthSessionVersion(),
         user: {
           id: 'worker-primary',
           username: 'GasTerus',
@@ -317,6 +345,7 @@ app.post('/api/admin/login', async (req, res) => {
         success: true,
         isAdminAccount: true,
         role: 'admin',
+        sessionVersion: await getAuthSessionVersion(),
         admin: {
           id: existingAdminUser.id,
           username: existingAdminUser.username,
@@ -356,6 +385,7 @@ app.post('/api/admin/login', async (req, res) => {
         success: true,
         isAdminAccount: false,
         role: 'worker',
+        sessionVersion: await getAuthSessionVersion(),
         worker: {
           id: worker ? worker.id : 'worker-primary',
           username: actualUsername,
@@ -424,13 +454,36 @@ app.post('/api/admin/create', async (req, res) => {
 // Change Admin Password
 app.post('/api/admin/change-password', async (req, res) => {
   try {
-    const { adminId, newPassword } = req.body;
+    const { adminId, newPassword, currentPassword } = req.body;
     if (!adminId || !newPassword || newPassword.trim().length < 5) {
       return res.status(400).json({ error: 'Password baru minimal 5 karakter' });
     }
 
+    if (adminId === 'adm-primary') {
+      const primaryAdmin = await queryOne('SELECT password FROM admins WHERE id = ?', [adminId]);
+      if (!primaryAdmin || !currentPassword || primaryAdmin.password !== currentPassword.trim()) {
+        return res.status(401).json({ error: 'Password saat ini untuk akun utama tidak sesuai' });
+      }
+    }
+
     await execute('UPDATE admins SET password = ? WHERE id = ?', [newPassword.trim(), adminId]);
-    res.json({ success: true, message: 'Password admin berhasil diubah' });
+    const sessionVersion = adminId === 'adm-primary' ? await invalidateAllAuthSessions() : undefined;
+    res.json({ success: true, message: 'Password admin berhasil diubah', sessionVersion });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/logout-all', async (req, res) => {
+  try {
+    const { adminId, currentPassword } = req.body;
+    const admin = await queryOne('SELECT id, role, password FROM admins WHERE id = ?', [adminId]);
+    if (!admin || admin.role !== 'super_admin' || !currentPassword || admin.password !== currentPassword.trim()) {
+      return res.status(401).json({ error: 'Hanya super admin dengan password yang benar yang dapat menghapus semua sesi' });
+    }
+
+    const sessionVersion = await invalidateAllAuthSessions();
+    res.json({ success: true, sessionVersion, message: 'Semua sesi telah dihapus' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

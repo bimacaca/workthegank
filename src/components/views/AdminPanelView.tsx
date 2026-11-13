@@ -66,6 +66,7 @@ export const AdminPanelView: React.FC = () => {
     adminAccounts,
     createAdminAccount,
     changeAdminPassword,
+    logoutAllSessions,
     deleteAdminAccount,
     activeAdmin,
     adminLogout,
@@ -166,6 +167,9 @@ export const AdminPanelView: React.FC = () => {
   const [newAdminRole, setNewAdminRole] = useState('admin');
   const [changePassAdminId, setChangePassAdminId] = useState<string | null>(null);
   const [changePassValue, setChangePassValue] = useState('');
+  const [changePassCurrentValue, setChangePassCurrentValue] = useState('');
+  const [sessionResetPassword, setSessionResetPassword] = useState('');
+  const [isResettingSessions, setIsResettingSessions] = useState(false);
   const [pinOperatorId, setPinOperatorId] = useState<string | null>(null);
   const [operatorPinValue, setOperatorPinValue] = useState('');
 
@@ -1516,6 +1520,43 @@ didaftarin> https://cutt.ly/WhatsapLENA
           {/* TAB 5: KELOLA AKUN ADMIN (ADMIN BISA BUAT USERNAME & PASSWORD) */}
           {activeTab === 'admin_users' && (
             <div className="space-y-6">
+              {activeAdmin?.role === 'super_admin' && (
+                <section className="bg-rose-50 border border-rose-200 rounded-xl p-5 sm:p-6 max-w-2xl space-y-4">
+                  <div className="flex items-start gap-3">
+                    <LogOut className="w-5 h-5 text-rose-700 mt-0.5 shrink-0" />
+                    <div>
+                      <h2 className="text-base font-bold text-rose-950">Hapus semua sesi login</h2>
+                      <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                        Semua pengerja dan admin yang sedang login akan dikeluarkan dan perlu login ulang. Sesi ini juga akan berakhir.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="password"
+                      value={sessionResetPassword}
+                      onChange={(event) => setSessionResetPassword(event.target.value)}
+                      placeholder="Konfirmasi password admin saat ini"
+                      className="flex-1 px-3 py-2 text-xs rounded-lg border border-rose-200 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={isResettingSessions || !sessionResetPassword}
+                      onClick={async () => {
+                        if (!window.confirm('Hapus semua sesi login sekarang? Semua orang harus login ulang.')) return;
+                        setIsResettingSessions(true);
+                        const ok = await logoutAllSessions(sessionResetPassword);
+                        setIsResettingSessions(false);
+                        if (ok) setSessionResetPassword('');
+                      }}
+                      className="px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold whitespace-nowrap"
+                    >
+                      {isResettingSessions ? 'Menghapus sesi…' : 'Hapus semua sesi'}
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {/* Form Tambah Admin Baru */}
               <div className="bg-white rounded-xl border border-gray-200 p-5 sm:p-7 shadow-xs max-w-2xl">
                 <div className="flex items-center gap-2 mb-1">
@@ -1652,6 +1693,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                                 onClick={() => {
                                   setChangePassAdminId(adm.id);
                                   setChangePassValue('');
+                                  setChangePassCurrentValue('');
                                 }}
                                 className="px-2.5 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded text-xs font-medium cursor-pointer"
                               >
@@ -1693,6 +1735,16 @@ didaftarin> https://cutt.ly/WhatsapLENA
               Masukkan password baru untuk akun admin <b>{adminAccounts.find((a) => a.id === changePassAdminId)?.username}</b>:
             </p>
 
+            {changePassAdminId === 'adm-primary' && (
+              <input
+                type="password"
+                value={changePassCurrentValue}
+                onChange={(e) => setChangePassCurrentValue(e.target.value)}
+                placeholder="Password saat ini"
+                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+              />
+            )}
+
             <input
               type="password"
               value={changePassValue}
@@ -1706,6 +1758,7 @@ didaftarin> https://cutt.ly/WhatsapLENA
                 onClick={() => {
                   setChangePassAdminId(null);
                   setChangePassValue('');
+                  setChangePassCurrentValue('');
                 }}
                 className="px-3.5 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg text-xs font-medium cursor-pointer"
               >
@@ -1717,10 +1770,15 @@ didaftarin> https://cutt.ly/WhatsapLENA
                     showToast('Password minimal 5 karakter!');
                     return;
                   }
-                  const ok = await changeAdminPassword(changePassAdminId, changePassValue);
+                  if (changePassAdminId === 'adm-primary' && !changePassCurrentValue) {
+                    showToast('Password saat ini wajib diisi untuk akun utama');
+                    return;
+                  }
+                  const ok = await changeAdminPassword(changePassAdminId, changePassValue, changePassCurrentValue);
                   if (ok) {
                     setChangePassAdminId(null);
                     setChangePassValue('');
+                    setChangePassCurrentValue('');
                   }
                 }}
                 className="px-4 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-xs font-bold cursor-pointer"

@@ -146,6 +146,9 @@ function initTables(database: Database) {
     INSERT OR IGNORE INTO app_settings (setting_key, setting_value)
     VALUES ('withdrawal_rate_per_number', '500');
 
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value)
+    VALUES ('auth_session_version', '1');
+
     CREATE TABLE IF NOT EXISTS admins (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,

@@ -77,7 +77,8 @@ interface AppContextType {
   adminAccounts: AdminAccount[];
   fetchAdminAccounts: () => Promise<void>;
   createAdminAccount: (user: string, pass: string, role?: string) => Promise<boolean>;
-  changeAdminPassword: (adminId: string, newPass: string) => Promise<boolean>;
+  changeAdminPassword: (adminId: string, newPass: string, currentPassword?: string) => Promise<boolean>;
+  logoutAllSessions: (currentPassword: string) => Promise<boolean>;
   deleteAdminAccount: (adminId: string) => Promise<boolean>;
   adminLogout: () => void;
 
@@ -96,6 +97,7 @@ const STORAGE_KEYS = {
   AUTH: 'wtg_auth_user_v2',
   ROLE: 'wtg_user_role_v2',
   ADMIN: 'wtg_admin_user_v2',
+  SESSION_VERSION: 'wtg_auth_session_version_v1',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -245,6 +247,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshData();
   }, [refreshData]);
 
+  // Session versions allow an admin-wide reset to log out other open browsers.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let active = true;
+    const validateSession = async () => {
+      try {
+        const response = await fetch('/api/auth/session-state');
+        if (!response.ok || !active) return;
+        const data = await response.json();
+        const savedVersion = localStorage.getItem(STORAGE_KEYS.SESSION_VERSION);
+        if (savedVersion && savedVersion === String(data.sessionVersion)) return;
+
+        active = false;
+        setIsLoggedIn(false);
+        setActiveAdmin(null);
+        setActiveOperator(null);
+        localStorage.removeItem(STORAGE_KEYS.AUTH);
+        localStorage.removeItem(STORAGE_KEYS.ROLE);
+        localStorage.removeItem(STORAGE_KEYS.ADMIN);
+        localStorage.removeItem(STORAGE_KEYS.ACTIVE_OP);
+        localStorage.removeItem(STORAGE_KEYS.SESSION_VERSION);
+        navigate('/login');
+        showToast('Sesi telah dihapus. Silakan login kembali.');
+      } catch {
+        // Keep the current client session if the server is temporarily unreachable.
+      }
+    };
+
+    void validateSession();
+    const intervalId = window.setInterval(() => void validateSession(), 15000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isLoggedIn, navigate]);
+
   // Fetch admin accounts list
   const fetchAdminAccounts = useCallback(async () => {
     try {
@@ -306,6 +345,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem(STORAGE_KEYS.AUTH, data.user.username);
         localStorage.setItem(STORAGE_KEYS.ROLE, 'admin');
         localStorage.setItem(STORAGE_KEYS.ADMIN, JSON.stringify(data.user));
+        localStorage.setItem(STORAGE_KEYS.SESSION_VERSION, String(data.sessionVersion));
         navigate('/admin');
         showToast(`Selamat datang di Panel Admin: ${data.user.username}`);
         await fetchAdminAccounts();
@@ -319,6 +359,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoggedIn(true);
         localStorage.setItem(STORAGE_KEYS.AUTH, data.user.username);
         localStorage.setItem(STORAGE_KEYS.ROLE, 'worker');
+        localStorage.setItem(STORAGE_KEYS.SESSION_VERSION, String(data.sessionVersion));
         localStorage.removeItem(STORAGE_KEYS.ADMIN);
         localStorage.removeItem(STORAGE_KEYS.ACTIVE_OP);
         navigate('/work/operator');
@@ -335,6 +376,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoggedIn(true);
         localStorage.setItem(STORAGE_KEYS.AUTH, 'GasTerus');
         localStorage.setItem(STORAGE_KEYS.ROLE, 'worker');
+        localStorage.removeItem(STORAGE_KEYS.SESSION_VERSION);
         localStorage.removeItem(STORAGE_KEYS.ADMIN);
         localStorage.removeItem(STORAGE_KEYS.ACTIVE_OP);
         navigate('/work/operator');
@@ -354,6 +396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem(STORAGE_KEYS.AUTH, 'worktheadmin');
         localStorage.setItem(STORAGE_KEYS.ROLE, 'admin');
         localStorage.setItem(STORAGE_KEYS.ADMIN, JSON.stringify(fallbackAdmin));
+        localStorage.removeItem(STORAGE_KEYS.SESSION_VERSION);
         navigate('/admin');
         showToast('Selamat datang di Panel Admin: worktheadmin');
         return true;
@@ -385,6 +428,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_KEYS.AUTH, data.admin.username);
       localStorage.setItem(STORAGE_KEYS.ROLE, 'admin');
       localStorage.setItem(STORAGE_KEYS.ADMIN, JSON.stringify(data.admin));
+      localStorage.setItem(STORAGE_KEYS.SESSION_VERSION, String(data.sessionVersion));
       navigate('/admin');
       showToast(`Berhasil masuk sebagai Admin: ${data.admin.username}`);
       await fetchAdminAccounts();
@@ -418,22 +462,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Change Admin Password
-  const changeAdminPassword = async (adminId: string, newPass: string): Promise<boolean> => {
+  const changeAdminPassword = async (adminId: string, newPass: string, currentPassword?: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/admin/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminId, newPassword: newPass }),
+        body: JSON.stringify({ adminId, newPassword: newPass, currentPassword }),
       });
       if (!res.ok) {
         const err = await res.json();
         showToast(err.error || 'Gagal mengubah password');
         return false;
       }
-      showToast('Password admin berhasil diubah!');
+      if (adminId === 'adm-primary') {
+        logout();
+        showToast('Password akun utama berubah. Semua sesi harus login ulang.');
+      } else {
+        showToast('Password admin berhasil diubah!');
+      }
       return true;
     } catch (e) {
       showToast('Gagal mengubah password');
+      return false;
+    }
+  };
+
+  const logoutAllSessions = async (currentPassword: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/admin/logout-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminId: activeAdmin?.id, currentPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'Gagal menghapus semua sesi');
+        return false;
+      }
+      logout();
+      showToast('Semua sesi dihapus. Silakan login kembali.');
+      return true;
+    } catch {
+      showToast('Gagal menghapus semua sesi');
       return false;
     }
   };
@@ -466,6 +536,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem(STORAGE_KEYS.ROLE);
     localStorage.removeItem(STORAGE_KEYS.ADMIN);
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_OP);
+    localStorage.removeItem(STORAGE_KEYS.SESSION_VERSION);
     navigate('/login');
     showToast('Telah keluar dari sistem');
   };
@@ -480,6 +551,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_OP);
     localStorage.removeItem(STORAGE_KEYS.ADMIN);
     localStorage.removeItem(STORAGE_KEYS.ROLE);
+    localStorage.removeItem(STORAGE_KEYS.SESSION_VERSION);
     navigate('/login');
     showToast('Telah keluar dari Panel Administrator');
   };
@@ -854,6 +926,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchAdminAccounts,
         createAdminAccount,
         changeAdminPassword,
+        logoutAllSessions,
         deleteAdminAccount,
         adminLogout,
         dailyStat,
